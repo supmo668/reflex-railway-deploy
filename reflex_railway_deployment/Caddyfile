@@ -1,0 +1,70 @@
+{
+    admin off
+    auto_https off # Railway handles HTTPS
+    log {
+        format json
+    }
+    servers {
+        trusted_proxies static private_ranges
+    }
+}
+
+:{$PORT} {
+    log {
+        format json
+    }
+
+    # Serve static files from the '.web/_static' folder
+    root * .web/_static
+
+    # Enable gzipping responses
+    encode gzip
+
+    # Handle websocket connections with proper CORS and headers
+    @websocket {
+        header Connection *Upgrade*
+        header Upgrade websocket
+        path /_event*
+    }
+
+    handle @websocket {
+        reverse_proxy 127.0.0.1:{$PORT} {
+            header_up Host {host}
+            header_up Connection "Upgrade"
+            header_up Upgrade "websocket"
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+
+            # Add CORS headers for WebSocket
+            header_down Access-Control-Allow-Origin "{$RAILWAY_PUBLIC_DOMAIN}"
+            header_down Access-Control-Allow-Methods "GET, POST, OPTIONS"
+            header_down Access-Control-Allow-Headers "Content-Type"
+        }
+    }
+
+    # Handle other API routes
+    handle /ping* {
+        reverse_proxy 127.0.0.1:{$PORT}
+    }
+
+    handle /_upload* {
+        reverse_proxy 127.0.0.1:{$PORT}
+    }
+
+    handle_path /backend/* {
+        reverse_proxy 127.0.0.1:{$PORT}
+    }
+
+    # Serve static files
+    file_server
+
+    # Allow for pretty paths with fallback to index.html
+    try_files {path} {path}.html /index.html
+
+    # Rewrite any errors to the corresponding error page
+    handle_errors {
+        rewrite * /{err.status_code}.html
+        file_server
+    }
+}
