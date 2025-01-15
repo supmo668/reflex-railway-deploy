@@ -11,6 +11,7 @@ The following environment variables are used in the application:
 
 | Variable | Description | Required | Default | Used In |
 |----------|-------------|----------|---------|---------|
+| `APP_NAME` | Name of the application used for internal routing | Yes | reflex_railway_deployment | Backend, Frontend |
 | `FRONTEND_DEPLOY_URL` | URL for frontend deployment | Yes | - | Backend |
 | `API_URL` | URL for backend API | Yes | - | Frontend |
 
@@ -88,9 +89,10 @@ cp .env.example .env
 ```bash
 # Common variables
 HUGGINGFACE_TOKEN=your_token_here
+APP_NAME=reflex_railway_deployment
 
 # Frontend service variables
-BACKEND_INTERNAL_URL=http://hf_video_annotation.railway.internal:8000
+BACKEND_INTERNAL_URL=http://${APP_NAME}.railway.internal:8000
 RAILWAY_PUBLIC_DOMAIN=frontend-annotation.up.railway.app  # Railway sets this automatically
 
 # Backend service variables
@@ -104,18 +106,19 @@ FRONTEND_ORIGIN=https://frontend-annotation.up.railway.app
 railway variables --service backend --set "HUGGINGFACE_TOKEN=your_token_here"
 railway variables --service backend --set "BACKEND_HOST=0.0.0.0"
 railway variables --service backend --set "FRONTEND_ORIGIN=https://frontend-annotation.up.railway.app"
+railway variables --service backend --set "APP_NAME=reflex_railway_deployment"
 
 # For frontend service
 # Note: BACKEND_INTERNAL_URL and RAILWAY_PUBLIC_DOMAIN are automatically set by Railway
 # But if needed, you can set them manually:
-railway variables --service frontend --set "BACKEND_INTERNAL_URL=http://hf_video_annotation.railway.internal:8000"
+railway variables --service frontend --set "BACKEND_INTERNAL_URL=http://${APP_NAME}.railway.internal:8000"
 railway variables --service frontend --set "RAILWAY_PUBLIC_DOMAIN=frontend-annotation.up.railway.app"
 ```
 
 ### Private Networking
 The backend service is available within Railway's private network at:
-- Internal URL: `hf_video_annotation.railway.internal`
-- Service name: `hf_video_annotation`
+- Internal URL: `${APP_NAME}.railway.internal`
+- Service name: `${APP_NAME}`
 
 Railway automatically provides the internal URL, which will be used by default in the configuration. You don't need to manually set this as Railway handles the internal networking automatically.
 
@@ -150,7 +153,7 @@ The application uses separate Caddyfile configurations for frontend and backend 
          encode gzip
          file_server
          try_files {path} {path}.html /index.html
-         reverse_proxy hf_video_annotation.railway.internal:8000
+         reverse_proxy ${APP_NAME}.railway.internal:8000
      }
      ```
 
