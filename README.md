@@ -12,8 +12,11 @@ The following environment variables are used in the application:
 | Variable | Description | Required | Default | Used In |
 |----------|-------------|----------|---------|---------|
 | `APP_NAME` | Name of the application used for internal routing | Yes | reflex_railway_deployment | Backend, Frontend |
+| `FRONTEND_NAME` | Name for frontend deployment | Yes | frontend | Frontend |
+| `BACKEND_NAME` | Name for backend deployment | Yes | backend | Backend |
 | `FRONTEND_DEPLOY_URL` | URL for frontend deployment | Yes | - | Backend |
 | `API_URL` | URL for backend API | Yes | - | Frontend |
+| `FRONTEND_DOMAIN` | Domain for frontend deployment | Yes | frontend-annotation | Frontend |
 
 ## Setup
 1. Clone the repository.
@@ -89,15 +92,17 @@ cp .env.example .env
 ```bash
 # Common variables
 HUGGINGFACE_TOKEN=your_token_here
-APP_NAME=reflex_railway_deployment
+APP_NAME=your_app_name
+FRONTEND_NAME=frontend
+BACKEND_NAME=backend
 
 # Frontend service variables
-BACKEND_INTERNAL_URL=http://${APP_NAME}.railway.internal:8000
-RAILWAY_PUBLIC_DOMAIN=frontend-annotation.up.railway.app  # Railway sets this automatically
+BACKEND_INTERNAL_URL=http://${BACKEND_NAME}.railway.internal:8000
+RAILWAY_PUBLIC_DOMAIN=${FRONTEND_NAME}.up.railway.app  # Railway sets this automatically
 
 # Backend service variables
 BACKEND_HOST=0.0.0.0
-FRONTEND_ORIGIN=https://frontend-annotation.up.railway.app
+FRONTEND_ORIGIN=https://${FRONTEND_NAME}.up.railway.app
 ```
 
 2. Set variables in Railway using the CLI:
@@ -105,20 +110,22 @@ FRONTEND_ORIGIN=https://frontend-annotation.up.railway.app
 # For backend service
 railway variables --service backend --set "HUGGINGFACE_TOKEN=your_token_here"
 railway variables --service backend --set "BACKEND_HOST=0.0.0.0"
-railway variables --service backend --set "FRONTEND_ORIGIN=https://frontend-annotation.up.railway.app"
-railway variables --service backend --set "APP_NAME=reflex_railway_deployment"
+railway variables --service backend --set "FRONTEND_ORIGIN=https://${FRONTEND_NAME}.up.railway.app"
+railway variables --service backend --set "APP_NAME=your_app_name"
+railway variables --service backend --set "FRONTEND_NAME=frontend"
+railway variables --service backend --set "BACKEND_NAME=backend"
 
 # For frontend service
 # Note: BACKEND_INTERNAL_URL and RAILWAY_PUBLIC_DOMAIN are automatically set by Railway
 # But if needed, you can set them manually:
-railway variables --service frontend --set "BACKEND_INTERNAL_URL=http://${APP_NAME}.railway.internal:8000"
-railway variables --service frontend --set "RAILWAY_PUBLIC_DOMAIN=frontend-annotation.up.railway.app"
+railway variables --service frontend --set "BACKEND_INTERNAL_URL=http://${BACKEND_NAME}.railway.internal:8000"
+railway variables --service frontend --set "RAILWAY_PUBLIC_DOMAIN=${FRONTEND_NAME}.up.railway.app"
 ```
 
 ### Private Networking
 The backend service is available within Railway's private network at:
-- Internal URL: `${APP_NAME}.railway.internal`
-- Service name: `${APP_NAME}`
+- Internal URL: `${BACKEND_NAME}.railway.internal`
+- Service name: `${BACKEND_NAME}`
 
 Railway automatically provides the internal URL, which will be used by default in the configuration. You don't need to manually set this as Railway handles the internal networking automatically.
 
@@ -153,7 +160,7 @@ The application uses separate Caddyfile configurations for frontend and backend 
          encode gzip
          file_server
          try_files {path} {path}.html /index.html
-         reverse_proxy ${APP_NAME}.railway.internal:8000
+         reverse_proxy ${BACKEND_NAME}.railway.internal:8000
      }
      ```
 
