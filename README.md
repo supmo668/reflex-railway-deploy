@@ -1,167 +1,121 @@
-# Video Player Template
+# Reflex Railway Deployment
 
-This repository provides a template for a simple video player application using Reflex. It includes basic state management for video playback.
+This repository contains tools and instructions for deploying Reflex applications to Railway.
 
-## Features
-- Video playback with controls.
+## Prerequisites
 
-## Environment Variables
+- [Railway CLI](https://docs.railway.app/develop/cli) installed
+- A Reflex application ready for deployment
+- A Railway account
 
-The following environment variables are used in the application:
+## Quick Start
 
-| Variable | Description | Required | Default | Used In |
-|----------|-------------|----------|---------|---------|
-| `APP_NAME` | Name of the application used for internal routing | Yes | reflex_railway_deployment | Backend, Frontend |
-| `FRONTEND_NAME` | Name for frontend deployment | Yes | frontend | Frontend |
-| `BACKEND_NAME` | Name for backend deployment | Yes | backend | Backend |
-| `FRONTEND_DEPLOY_URL` | URL for frontend deployment | Yes | - | Backend |
-| `API_URL` | URL for backend API | Yes | - | Frontend |
-| `FRONTEND_DOMAIN` | Domain for frontend deployment | Yes | frontend-annotation | Frontend |
+1. Clone this repository alongside your Reflex app
+2. Configure your environment variables
+3. Run the deployment script
 
-## Setup
-1. Clone the repository.
-2. Install dependencies:
+## Detailed Steps
+
+### 1. Project Setup
+
+First, initialize your Railway project:
+
 ```bash
-pip install -r requirements.txt
-```
-3. Set up environment variables:
-   - Copy `.env.example` to `.env`
-   - Update the values in `.env` with your credentials
-```bash
-cp .env.example .env
-```
-4. Run the application.
+# Navigate to your Reflex app directory
+cd your-reflex-app
 
-## Configuration
-- Adjust `rxconfig.py` as needed.
+# Login to Railway
+railway login
 
-## Usage
-- The main page features a video player component.
-
-## Railway Deployment Configuration
-
-### Environment Setup
-- Ensure you have the Railway CLI installed and configured.
-- Have access to your Railway project where you want to deploy the services.
-
-### Security and CORS Configuration
-- The application uses `SecurityHeadersMiddleware` to enforce security headers and CORS policies.
-- Set the `FRONTEND_DEPLOY_URL` environment variable to specify the allowed frontend origin for CORS.
-- Security headers include:
-  - `X-Content-Type-Options: nosniff`
-  - `X-Frame-Options: DENY`
-  - `X-XSS-Protection: 1; mode=block`
-  - `Referrer-Policy: strict-origin-when-cross-origin`
-- CORS headers allow credentials and specify allowed methods and headers.
-
-### Deployment Steps
-
-1. **Copy the Appropriate Caddyfile and Nixpacks Configuration**
-   - For the backend service:
-     - Copy the contents of `Caddyfile.backend` into `Caddyfile`.
-     - Copy the contents of `nixpacks.backend.toml` into `nixpacks.toml`.
-   - For the frontend service:
-     - Copy the contents of `Caddyfile.frontend` into `Caddyfile`.
-     - Copy the contents of `nixpacks.frontend.toml` into `nixpacks.toml`.
-
-2. **Deploy Each Service Separately**
-   - **Backend Service**:
-     - Navigate to the directory containing your backend service files.
-     - Use the Railway CLI to select the backend service:
-       ```bash
-       railway use <backend-service-id>
-       ```
-     - Deploy the backend service:
-       ```bash
-       railway up
-       ```
-   - **Frontend Service**:
-     - Navigate to the directory containing your frontend service files.
-     - Use the Railway CLI to select the frontend service:
-       ```bash
-       railway use <frontend-service-id>
-       ```
-     - Deploy the frontend service:
-       ```bash
-       railway up
-       ```
-
-### Environment Variables for Deployment
-
-1. Create a `.env` file with your configuration:
-```bash
-# Common variables
-HUGGINGFACE_TOKEN=your_token_here
-APP_NAME=your_app_name
-FRONTEND_NAME=frontend
-BACKEND_NAME=backend
-
-# Frontend service variables
-BACKEND_INTERNAL_URL=http://${BACKEND_NAME}.railway.internal:8000
-RAILWAY_PUBLIC_DOMAIN=${FRONTEND_NAME}.up.railway.app  # Railway sets this automatically
-
-# Backend service variables
-BACKEND_HOST=0.0.0.0
-FRONTEND_ORIGIN=https://${FRONTEND_NAME}.up.railway.app
+# Initialize a new Railway project
+railway init
 ```
 
-2. Set variables in Railway using the CLI:
-```bash
-# For backend service
-railway variables --service backend --set "HUGGINGFACE_TOKEN=your_token_here"
-railway variables --service backend --set "BACKEND_HOST=0.0.0.0"
-railway variables --service backend --set "FRONTEND_ORIGIN=https://${FRONTEND_NAME}.up.railway.app"
-railway variables --service backend --set "APP_NAME=your_app_name"
-railway variables --service backend --set "FRONTEND_NAME=frontend"
-railway variables --service backend --set "BACKEND_NAME=backend"
+### 2. Create Services
 
-# For frontend service
-# Note: BACKEND_INTERNAL_URL and RAILWAY_PUBLIC_DOMAIN are automatically set by Railway
-# But if needed, you can set them manually:
-railway variables --service frontend --set "BACKEND_INTERNAL_URL=http://${BACKEND_NAME}.railway.internal:8000"
-railway variables --service frontend --set "RAILWAY_PUBLIC_DOMAIN=${FRONTEND_NAME}.up.railway.app"
+Create the necessary services in Railway:
+
+```bash
+# Create frontend service
+railway service create frontend
+
+# Create backend service
+railway service create backend
+
+# Link your local project to these services
+railway link
 ```
 
-### Private Networking
-The backend service is available within Railway's private network at:
-- Internal URL: `${BACKEND_NAME}.railway.internal`
-- Service name: `${BACKEND_NAME}`
+### 3. Environment Variables for Deployment
 
-Railway automatically provides the internal URL, which will be used by default in the configuration. You don't need to manually set this as Railway handles the internal networking automatically.
+1. Create a `.env` file by copying and modifying the template:
+   ```bash
+   cp .env.template .env
+   # Edit .env with your specific values
+   ```
 
-Key points:
-1. The internal URL is automatically provided by Railway as `BACKEND_INTERNAL_URL`
-2. CORS is configured to allow:
-   - Local development (`http://localhost:3000`)
-   - Production frontend domain (set via `FRONTEND_ORIGIN`)
-3. WebSocket connections are handled through the internal network
+   > **Important**: The `.env` file should include both Railway deployment variables AND your application-specific variables. If your app already has an `.env` file, merge the contents of `.env.template` with your existing `.env` file.
 
-### Deployment Configuration Files
+2. Configure your environment variables (example):
+   ```bash
+   # Common variables
+   APP_NAME=my-reflex-app
+   FRONTEND_NAME=frontend
+   BACKEND_NAME=backend
+   
+   # Your app-specific variables
+   DATABASE_URL=postgresql://postgres:postgres@db.railway.internal:5432/railway
+   OPENAI_API_KEY=sk-your-api-key
+   ```
 
-#### Caddyfile Configuration
-The application uses separate Caddyfile configurations for frontend and backend services:
+3. Set all variables in Railway automatically using the provided script:
+   ```bash
+   # Make sure you're logged in to Railway CLI first
+   railway login
+   
+   # Run the script to set all variables from your .env file
+   chmod +x set_railway_vars.sh
+   ./set_railway_vars.sh
+   ```
 
-1. `Caddyfile.frontend`:
-   - Located at: `railway_deployment/frontend/Caddyfile`
-   - Purpose: Handles frontend routing and proxies API requests to the backend
-   - Key features:
-     - Serves static files from `.web/_static`
-     - Routes all requests to the backend service
-     - Manages error pages and fallbacks
-   - Configuration:
-     ```caddy
-     {
-         admin off
-         auto_https off
-     }
+   This script will:
+   - Set all necessary Railway configuration variables
+   - Automatically configure any app-specific variables
+   - Set up proper communication between frontend and backend services
 
-     :{$PORT} {
-         root * .web/_static
-         encode gzip
-         file_server
-         try_files {path} {path}.html /index.html
-         reverse_proxy ${BACKEND_NAME}.railway.internal:8000
-     }
-     ```
+4. Verify your variables in the Railway dashboard or using the CLI:
+   ```bash
+   railway variables --service frontend
+   railway variables --service backend
+   ```
 
-This template is ideal for building more complex video applications.
+### 4. Deploy Your Application
+
+Deploy your application to Railway:
+
+```bash
+# Deploy backend
+railway up --service backend
+
+# Deploy frontend
+railway up --service frontend
+```
+
+### 5. Access Your Deployed Application
+
+Once deployed, you can access your application at:
+
+```
+https://<frontend-name>.up.railway.app
+```
+
+## Troubleshooting
+
+- **Connection Issues**: Ensure that FRONTEND_ORIGIN and BACKEND_INTERNAL_URL are correctly set
+- **Deployment Failures**: Check Railway logs with `railway logs --service <service-name>`
+- **Environment Variables**: Verify all required variables are set with `railway variables --service <service-name>`
+
+## Additional Resources
+
+- [Railway Documentation](https://docs.railway.app/)
+- [Reflex Documentation](https://reflex.dev/docs/)
