@@ -96,7 +96,30 @@ deploy_postgres() {
     print_success "PostgreSQL service deployed"
 }
 
-# Get PostgreSQL connection variables
+# Function to update environment variable in .env file
+update_env_variable() {
+    local var_name=$1
+    local var_value=$2
+    local env_file=$3
+    
+    if [ -z "$var_name" ] || [ -z "$var_value" ] || [ -z "$env_file" ]; then
+        print_error "update_env_variable: Missing required parameters"
+        return 1
+    fi
+    
+    # Use sed to replace existing variable line or add it if it doesn't exist
+    if grep -q "^${var_name}=" "$env_file" 2>/dev/null; then
+        # Replace existing variable line
+        sed -i "s|^${var_name}=.*|${var_name}=${var_value}|" "$env_file"
+        print_success "Updated ${var_name} in $env_file"
+    else
+        # Add variable if it doesn't exist
+        echo "${var_name}=${var_value}" >> "$env_file"
+        print_success "Added ${var_name} to $env_file"
+    fi
+}
+
+# Get PostgreSQL connection variables and update .env file
 get_postgres_vars() {
     if [ "$ENABLE_POSTGRES" = false ]; then
         return 0
@@ -104,44 +127,57 @@ get_postgres_vars() {
     
     print_status "Retrieving PostgreSQL connection variables..."
     
-    # Get DATABASE_URL from postgres service (automatically named "Postgres")
-    DB_URL=$(railway variables --service "Postgres" --json 2>/dev/null | jq -r '.DATABASE_URL // empty' 2>/dev/null || echo "")
+    # Get DATABASE_PUBLIC_URL from postgres service (automatically named "Postgres")
+    DB_URL=$(railway variables --service "Postgres" --json 2>/dev/null | jq -r '.DATABASE_PUBLIC_URL // empty' 2>/dev/null || echo "")
     
     if [ -z "$DB_URL" ]; then
-        print_warning "Could not retrieve DATABASE_URL from PostgreSQL service"
+        print_warning "Could not retrieve DATABASE_PUBLIC_URL from PostgreSQL service"
         print_status "This is normal if the service is still starting up"
-        print_status "DATABASE_URL will be available once PostgreSQL is fully deployed"
+        print_status "DATABASE_PUBLIC_URL will be available once PostgreSQL is fully deployed"
         return 0
     fi
     
-    print_success "DATABASE_URL retrieved successfully"
+    print_success "DATABASE_PUBLIC_URL retrieved successfully"
     export DB_URL
+    
+    # Update .env file with DB_URL
+    update_env_variable "DB_URL" "$DB_URL" "$ENV_FILE"
 }
 
-# Run database migrations
+# Run database initialization and migrations
 run_db_migrations() {
     if [ "$ENABLE_POSTGRES" = false ]; then
-        print_status "Database migrations skipped (PostgreSQL disabled)"
+        print_status "Database initialization and migrations skipped (PostgreSQL disabled)"
         return 0
     fi
     
     if [ -z "$DB_URL" ]; then
-        print_warning "DB_URL not available, skipping migrations"
-        print_status "You may need to run 'reflex db migrate' manually after deployment"
+        print_warning "DB_URL not available, skipping database initialization and migrations"
+        print_status "You may need to run 'reflex db init' and 'reflex db migrate' manually after deployment"
         return 0
     fi
     
-    print_status "Running database migrations..."
+    print_status "Initializing database schema..."
     
     # Set DB_URL for the migration
     export DB_URL
+    
+    # Run reflex db init first
+    if reflex db init; then
+        print_success "Database initialization completed successfully"
+    else
+        print_warning "Database initialization failed or already initialized"
+        print_status "This may be normal if the database is already initialized"
+    fi
+    
+    print_status "Running database migrations..."
     
     # Run reflex db migrate
     if reflex db migrate; then
         print_success "Database migrations completed successfully"
     else
         print_warning "Database migrations failed or no migrations to run"
-        print_status "This may be normal if this is the first deployment"
+        print_status "This may be normal if this is the first deployment or no migrations are needed"
     fi
 }
 
@@ -180,23 +216,11 @@ setup_environment_variables() {
     if [ -z "$API_URL" ]; then
         export API_URL="http://${BACKEND_NAME}.railway.internal:8080"
         print_status "Setting API_URL to $API_URL"
+        # Update API_URL in .env file
+        update_env_variable "API_URL" "$API_URL" "$ENV_FILE"
     fi
     
-    # Add DB_URL to .env file if PostgreSQL is enabled and DB_URL was retrieved
-    if [ "$ENABLE_POSTGRES" = true ] && [ -n "$DB_URL" ]; then
-        print_status "Adding DB_URL to $ENV_FILE..."
-        
-        # Use sed to replace existing DB_URL line or add it if it doesn't exist
-        if grep -q "^DB_URL=" "$ENV_FILE" 2>/dev/null; then
-            # Replace existing DB_URL line
-            sed -i "s|^DB_URL=.*|DB_URL=$DB_URL|" "$ENV_FILE"
-            print_success "Updated DB_URL in $ENV_FILE"
-        else
-            # Add DB_URL if it doesn't exist
-            echo "DB_URL=$DB_URL" >> "$ENV_FILE"
-            print_success "Added DB_URL to $ENV_FILE"
-        fi
-    fi
+    # Note: DB_URL is already set in .env file by get_postgres_vars function
     
     # Check if set_railway_vars.sh exists before using it
     if [ ! -f "$DEPLOY_DIR/set_railway_vars.sh" ]; then
@@ -405,10 +429,10 @@ init_railway_project
 print_header "Step 3: Setting Up Database"
 deploy_postgres
 
-print_header "Step 4: Configuring Database Connection"
+print_header "Step 4: Configuring Database Connection and Schema"
 get_postgres_vars
 
-print_header "Step 5: Running Database Migrations"
+print_header "Step 5: Initializing Database and Running Migrations"
 run_db_migrations
 
 print_header "Step 6: Creating Application Services"
