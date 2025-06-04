@@ -14,9 +14,10 @@ The following environment variables are used in the application:
 | `APP_NAME` | Name of the application used for internal routing | No | Yes | reflex_railway_deployment | Backend, Frontend |
 | `FRONTEND_NAME` | Name for frontend deployment | No | Yes | frontend | Frontend |
 | `BACKEND_NAME` | Name for backend deployment | No | Yes | backend | Backend |
+| `FRONTEND_DOMAIN` | Domain for frontend deployment | No | Yes | frontend-annotation | Frontend |
 | `FRONTEND_DEPLOY_URL` | URL for frontend deployment | Yes | No | - | Backend |
 | `API_URL` | URL for backend API (points to internal backend service name) | Yes | No | - | Frontend |
-| `FRONTEND_DOMAIN` | Domain for frontend deployment | No | Yes | frontend-annotation | Frontend |
+
 
 ## Environment Variable Clarification
 
