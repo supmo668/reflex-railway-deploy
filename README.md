@@ -14,18 +14,22 @@ The following environment variables are used in the application:
 | `APP_NAME` | Name of the application used for internal routing | No | Yes | reflex_railway_deployment | Backend, Frontend |
 | `FRONTEND_NAME` | Name for frontend deployment | No | Yes | frontend | Frontend |
 | `BACKEND_NAME` | Name for backend deployment | No | Yes | backend | Backend |
-| `FRONTEND_DOMAIN` | Domain for frontend deployment | No | Yes | frontend-annotation | Frontend |
+| `FRONTEND_DOMAIN` | Domain for frontend deployment | No | Yes | frontend | Frontend |
+| `REFLEX_ENV` | Environment mode for Reflex application | No (defaulted) | No | prod | Nixpacks (Backend, Frontend) |
 | `FRONTEND_DEPLOY_URL` | URL for frontend deployment | Yes | No | - | Backend |
 | `API_URL` | URL for backend API (points to internal backend service name) | Yes | No | - | Frontend |
+| `DB_URL` | PostgreSQL database connection URL (automatically set by Railway) | Yes (if using DB) | No | - | Backend |
 
 
 ## Environment Variable Clarification
 
 ### Variables Required for Application Runtime
-Only two variables are strictly necessary for the application to run properly:
+Only these variables are strictly necessary for the application to run properly:
 
 - `FRONTEND_DEPLOY_URL`: The URL where your frontend is deployed (used by the backend)
 - `API_URL`: The URL for your backend API (used by the frontend). it must point to the internal backend service name defined when setting up with `railway add --service backend`. For example, if your backend service is named 'backend', your API_URL would be 'http://backend:8080'.
+- `REFLEX_ENV`: The environment mode for Reflex (defaults to "prod" for production deployment)
+- `DB_URL`: PostgreSQL database connection URL (automatically provided by Railway when PostgreSQL service is deployed)
 
 ### Variables Required for Deploymsent Setup
 These variables are needed during the Railway setup process but are not required for the application to run:
@@ -86,13 +90,14 @@ railway init
 
 #### Add Services to Your Project
 
-For a typical Reflex application, you'll need both frontend and backend services:
+For a typical Reflex application, you should add the PostgreSQL database first, then the application services:
 
 ```bash
-# Add a frontend service
-railway add --service frontend
+# Step 1: Add PostgreSQL database service first (recommended for applications with database)
+railway add -d postgres
 
-# Add a backend service
+# Step 2: Add application services
+railway add --service frontend
 railway add --service backend
 
 # Verify the services were added
@@ -102,6 +107,49 @@ railway status
 # For example, if your backend service is named 'backend', your API_URL would be 'http://backend:8080'
 # This is because Railway uses the service name for internal routing
 ```
+
+**Important:** Adding PostgreSQL first allows you to run database migrations before deploying your application services.
+
+**Note:** Railway automatically names the PostgreSQL service "Postgres" when using the `-d postgres` flag.
+
+#### PostgreSQL Database Setup
+
+If your Reflex application requires a database, Railway provides managed PostgreSQL:
+
+1. **Add PostgreSQL Service**:
+   ```bash
+   railway add -d postgres
+   ```
+   Railway automatically names the PostgreSQL service "Postgres" when using the database template.
+
+2. **Database Connection**:
+   - Railway automatically provides a `DATABASE_URL` environment variable
+   - This variable is automatically available to all services in your project
+   - Reflex applications typically use `DB_URL` variable name, which will be set automatically by the deployment script
+
+3. **Database Configuration in Reflex**:
+   - Your Reflex app should be configured to use the `DB_URL` environment variable
+   - Example in your Reflex configuration:
+   ```python
+   import os
+   
+   DATABASE_URL = os.getenv("DB_URL", "sqlite:///reflex.db")  # fallback to SQLite for local dev
+   ```
+
+4. **Database Migrations**:
+   After the PostgreSQL service is deployed and the connection is established, run database migrations:
+   ```bash
+   # Set the DB_URL environment variable (automatically done by deployment script)
+   export DB_URL=$(railway variables --service Postgres --json | jq -r '.DATABASE_URL')
+   
+   # Run database migrations
+   reflex db migrate
+   ```
+
+5. **Automatic Setup**:
+   - The `deploy_all.sh` script can automatically set up PostgreSQL (enabled by default)
+   - The script will also run `reflex db migrate` automatically after setting up the database
+   - Use `--no-postgres` flag to skip PostgreSQL setup if not needed
 
 #### Link to Specific Services
 
@@ -199,8 +247,64 @@ railway environment
    railway variables --service backend
    ```
 
-### Deployment Steps
+### Automated Deployment with deploy_all.sh
 
+The easiest way to deploy your Reflex application is using the provided automated deployment script:
+
+```bash
+# Make the script executable
+chmod +x deploy_all.sh
+
+# Deploy with default settings (includes PostgreSQL)
+./deploy_all.sh
+
+# Deploy without PostgreSQL
+./deploy_all.sh --no-postgres
+
+# Deploy with custom environment file and verbose output
+./deploy_all.sh -f .env.production -v
+
+# View all available options
+./deploy_all.sh --help
+```
+
+**What the script does automatically:**
+1. ✅ Validates Railway CLI installation and authentication
+2. ✅ Initializes Railway project if needed
+3. ✅ Sets up PostgreSQL service first (optional, enabled by default)
+4. ✅ Retrieves database connection URL
+5. ✅ Runs database migrations (`reflex db migrate`)
+6. ✅ Creates frontend and backend services
+7. ✅ Configures environment variables for all services
+8. ✅ Deploys backend and frontend services
+9. ✅ Provides deployment summary with URLs
+
+**Script Options:**
+- `--help`: Show help message with all options
+- `--no-postgres`: Skip PostgreSQL deployment
+- `--postgres`: Enable PostgreSQL deployment (default)
+- `-f, --file`: Specify custom environment file (default: .env)
+- `-v, --verbose`: Enable verbose output
+- `-d, --deploy-dir`: Specify deployment directory (default: reflex-railway-deploy)
+
+### Manual Deployment Steps
+
+If you prefer to deploy manually or need more control over the process:
+
+#### Step 1: Deploy PostgreSQL First
+```bash
+# Add and deploy PostgreSQL service first (automatically named "Postgres")
+railway add -d postgres
+
+# Wait for deployment to complete and get DATABASE_URL
+railway status --service Postgres
+
+# Set DB_URL and run migrations
+export DB_URL=$(railway variables --service Postgres --json | jq -r '.DATABASE_URL')
+reflex db migrate
+```
+
+#### Step 2: Deploy Application Services
 1. **Copy the Appropriate Caddyfile and Nixpacks Configuration**
    - For the backend service:
      - Copy the contents of `Caddyfile.backend` into `Caddyfile`.
