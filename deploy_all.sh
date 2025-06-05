@@ -71,6 +71,7 @@ setup_vars() {
     
     # Set URLs
     export REFLEX_API_URL="http://${BACKEND_NAME}.railway.internal:8080"
+        # temporary FRONTEND_DEPLOY_URL (likely to change after deployment)
     export FRONTEND_DEPLOY_URL="https://${FRONTEND_NAME}-${RAILWAY_ENVIRONMENT}.up.railway.app"
     
     # Get database URL if PostgreSQL enabled
@@ -147,6 +148,7 @@ update_frontend_url() {
         export FRONTEND_DEPLOY_URL="https://$REFLEX_PUBLIC_DOMAIN"
         update_env "FRONTEND_DEPLOY_URL" "$FRONTEND_DEPLOY_URL" "$ENV_FILE"
         "$DEPLOY_DIR/set_railway_vars.sh" -s "$BACKEND_NAME" -f "$ENV_FILE" 2>/dev/null || warn "Failed to update backend with new frontend URL"
+        "$DEPLOY_DIR/set_railway_vars.sh" -s "$FRONTEND_NAME" -f "$ENV_FILE" 2>/dev/null || warn "Failed to update backend with new frontend URL"
         success "Frontend URL updated: $FRONTEND_DEPLOY_URL"
     fi
 }

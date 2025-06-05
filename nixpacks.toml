@@ -18,7 +18,7 @@ providers = ['python']
     dependsOn = ['install'] # run after install (install is the default phase for installing the python modules)
     cmds = ['reflex init'] # re-initialize the app with the latest template
 
-# export frontend phase
+# export backend phase
 [phases.export]
     dependsOn = ['init'] # run after init
     cmds = [
@@ -41,5 +41,5 @@ providers = ['python']
 
 # start phase
 [start]
-    cmd = 'FRONTEND_DEPLOY_URL="${FRONTEND_DEPLOY_URL}" REFLEX_API_URL="${REFLEX_API_URL}" reflex run --frontend-only --env ${REFLEX_ENV_MODE:-prod} && caddy run 2>&1'
+    cmd = 'FRONTEND_DEPLOY_URL="${FRONTEND_DEPLOY_URL}" reflex run --backend-only --env ${REFLEX_ENV_MODE:-prod} && caddy run 2>&1'
     # run the backend and caddy in parallel, this will fail fast if either service crashes allowing railway to restart the deployment
