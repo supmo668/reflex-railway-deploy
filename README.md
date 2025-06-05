@@ -15,7 +15,7 @@ The following environment variables are used in the application:
 | `FRONTEND_NAME` | Name for frontend deployment | No | Yes | frontend | Frontend |
 | `BACKEND_NAME` | Name for backend deployment | No | Yes | backend | Backend |
 | `FRONTEND_DOMAIN` | Domain for frontend deployment | No | Yes | frontend | Frontend |
-| `REFLEX_ENV` | Environment mode for Reflex application | No (defaulted) | No | prod | Nixpacks (Backend, Frontend) |
+| `REFLEX_ENV_MODE` | Environment mode for Reflex application | No (defaulted) | No | prod | Nixpacks (Backend, Frontend) |
 | `FRONTEND_DEPLOY_URL` | URL for frontend deployment | Yes | No | - | Backend |
 | `API_URL` | URL for backend API (points to internal backend service name) | Yes | No | - | Frontend |
 | `DB_URL` | PostgreSQL database connection URL (automatically set by Railway) | Yes (if using DB) | No | - | Backend |

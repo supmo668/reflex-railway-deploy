@@ -3,7 +3,7 @@ import reflex as rx
 
 # Environment variables
 backend_host = os.getenv("BACKEND_HOST", "0.0.0.0")
-api_url = os.getenv("API_URL", "http://localhost:8000")
+api_url = os.getenv("REFLEX_API_URL", "http://localhost:8000")
 deploy_url = os.getenv("FRONTEND_DEPLOY_URL", os.getenv("RAILWAY_PUBLIC_DOMAIN", "http://localhost:3000"))
 os.environ["FRONTEND_DEPLOY_URL"] = deploy_url
 
@@ -17,7 +17,7 @@ if frontend_origin := os.getenv("FRONTEND_ORIGIN"):
 
 # Reflex configuration
 config = rx.Config(
-    app_name="hf_video_annotation",
+    app_name=os.getenv("REFLEX_APP_NAME", "app"),
     api_url=api_url,  # Use root for API communication
     deploy_url=deploy_url,
     cors_allowed_origins=cors_origins,
