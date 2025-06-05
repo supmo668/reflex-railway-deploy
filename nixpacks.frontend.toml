@@ -1,4 +1,5 @@
 # default to the python provider
+# nixpacks for railway frontend deployment. Copy to nixpacks.toml and deploy with `railway up`
 providers = ['python']
 
 # set up some variables to minimize annoyance
