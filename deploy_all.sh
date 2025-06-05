@@ -11,6 +11,14 @@ warn() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 header() { echo -e "${BLUE}================ $1 ================${NC}"; }
 
+# Interactive pause function
+pause_for_verification() {
+    local message="$1"
+    echo -e "${YELLOW}[PAUSE]${NC} $message"
+    echo -e "${YELLOW}Press ENTER to continue or Ctrl+C to exit...${NC}"
+    read -r
+}
+
 # Validate environment
 validate_env() {
     command -v railway &> /dev/null || error "Railway CLI not found. Install with: npm i -g @railway/cli"
@@ -185,11 +193,23 @@ header "Reflex Railway Deployment"
 echo "App: $REFLEX_APP_NAME | Frontend: $FRONTEND_NAME | Backend: $BACKEND_NAME | PostgreSQL: $([ "$ENABLE_POSTGRES" = true ] && echo "Enabled" || echo "Disabled")"
 
 validate_env
+pause_for_verification "Environment validation complete. Ready to initialize Railway project."
+
 init_project
+pause_for_verification "Railway project initialization complete. Ready to deploy PostgreSQL (if enabled)."
+
 deploy_postgres
+pause_for_verification "PostgreSQL deployment complete. Ready to setup environment variables."
+
 setup_vars
+pause_for_verification "Environment variables setup complete. Ready to run database migrations."
+
 run_migrations
+pause_for_verification "Database migrations complete. Ready to setup Railway services."
+
 setup_services
+pause_for_verification "Railway services setup complete. Ready to deploy all services."
+
 deploy_all
 
 # Summary

@@ -22,7 +22,7 @@ providers = ['python']
 [phases.export]
     dependsOn = ['init'] # run after init
     cmds = [
-        'FRONTEND_DEPLOY_URL="https://frontend-annotation.up.railway.app"',
+        'FRONTEND_DEPLOY_URL="${FRONTEND_DEPLOY_URL}"',
         'REFLEX_API_URL="${REFLEX_API_URL}"',
         'reflex export --frontend-only --no-zip'
     ]
