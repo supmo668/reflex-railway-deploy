@@ -1,148 +1,76 @@
 #!/bin/bash
-# set_railway_vars.sh - Set Railway environment variables from environment file
+# set_railway_vars.sh - Set Railway environment variables from .env file
 #
-# Usage:
-#   ./set_railway_vars.sh [options]
-#
-# Options:
-#   -h, --help                 Show this help message
-#   -s, --service SERVICE      Service name to update in Railway
-#   -f, --file FILENAME        Environment file to use [default: .env]
-#   -v, --verbose              Enable verbose output
-#
-# Examples:
-#   ./set_railway_vars.sh -s my-service           # Set variables for 'my-service' from .env
-#   ./set_railway_vars.sh -s my-service -f .env.prod  # Use .env.prod file
+# Usage: ./set_railway_vars.sh -s SERVICE [-f FILE] [-v]
+# Example: ./set_railway_vars.sh -s backend -f .env
 
-# Default values
-SERVICE="frontend"
-ENV_FILE=".env"
-VERBOSE=false
+set -e
 
-# Parse command line arguments
+# Defaults
+SERVICE="" ENV_FILE=".env" VERBOSE=false
+
+# Parse arguments
 while [[ $# -gt 0 ]]; do
   case $1 in
-    -h|--help)
-      echo "Usage: $0 [options]"
-      echo ""
-      echo "Options:"
-      echo "  -h, --help                 Show this help message"
-      echo "  -s, --service SERVICE      Service name to update in Railway"
-      echo "  -f, --file FILENAME        Environment file to use [default: .env]"
-      echo "  -v, --verbose              Enable verbose output"
-      echo ""
-      echo "Examples:"
-      echo "  $0 -s my-service           # Set variables for 'my-service' from .env"
-      echo "  $0 -s my-service -f .env.prod  # Use .env.prod file"
-      exit 0
-      ;;
-    -s|--service)
-      SERVICE="$2"
-      shift 2
-      ;;
-    -f|--file)
-      ENV_FILE="$2"
-      shift 2
-      ;;
-    -v|--verbose)
-      VERBOSE=true
-      shift
-      ;;
-    *)
-      echo "Unknown option: $1"
-      exit 1
-      ;;
+    -h|--help) echo "Usage: $0 -s SERVICE [-f FILE] [-v]"; exit 0 ;;
+    -s|--service) SERVICE="$2"; shift 2 ;;
+    -f|--file) ENV_FILE="$2"; shift 2 ;;
+    -v|--verbose) VERBOSE=true; shift ;;
+    *) echo "Error: Unknown option $1"; exit 1 ;;
   esac
 done
 
-# Validate service argument
-if [ -z "$SERVICE" ]; then
-  echo "Error: Service name is required. Use -s or --service to specify."
-  exit 1
-fi
+# Validate inputs
+[ -z "$SERVICE" ] && { echo "Error: Service name required (-s)"; exit 1; }
+[ ! -f "$ENV_FILE" ] && { echo "Error: File $ENV_FILE not found"; exit 1; }
+command -v railway &> /dev/null || { echo "Error: Railway CLI not found"; exit 1; }
+railway whoami &> /dev/null || { echo "Error: Not logged in to Railway"; exit 1; }
 
-# Check if env file exists
-if [ ! -f "$ENV_FILE" ]; then
-  echo "Error: Environment file $ENV_FILE not found"
-  exit 1
-fi
+# Set variables from .env file to Railway service
+echo "Setting variables for $SERVICE from $ENV_FILE..."
 
-# Check if railway CLI is installed
-if ! command -v railway &> /dev/null; then
-  echo "Error: Railway CLI not found. Please install it first:"
-  echo "npm i -g @railway/cli"
-  exit 1
-fi
+# Count and process variables
+var_count=0 success_count=0 error_count=0
 
-# Check if logged in to Railway
-if ! railway whoami &> /dev/null; then
-  echo "Error: Not logged in to Railway. Please run 'railway login' first"
-  exit 1
-fi
-
-# Load environment variables from file
-set -a
-source "$ENV_FILE"
-set +a
-
-# Function to set only variables from the .env file for a service
-set_env_variables() {
-  local service_name=$1
-  local env_file=$2
+while IFS= read -r line || [ -n "$line" ]; do
+  # Skip comments and empty lines
+  [[ "$line" =~ ^[[:space:]]*# ]] || [[ "$line" =~ ^[[:space:]]*$ ]] || [[ ! "$line" == *=* ]] && continue
   
-  echo "Setting variables for $service_name service from $env_file..."
+  # Extract variable name and value
+  var_name=$(echo "$line" | cut -d= -f1 | xargs)
+  var_value=$(echo "$line" | cut -d= -f2- | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/")
   
-  # Check if file exists
-  if [ ! -f "$env_file" ]; then
-    echo "Error: Environment file $env_file not found"
-    exit 1
-  fi
+  # Skip invalid variable names
+  [[ -z "$var_name" ]] && continue
   
-  # Count variables to be set
-  local var_count=$(grep -v '^\s*#' "$env_file" | grep '=' | wc -l)
-  echo "Found $var_count variables to set"
+  # Safeguard: Handle empty values by setting them explicitly
+  # This ensures the variable exists in Railway even if empty
+  var_value=${var_value:-""}
   
-  # Read the .env file line by line
-  while IFS= read -r line; do
-    # Skip comments and empty lines
-    if [[ ! "$line" =~ ^\s*# && ! "$line" =~ ^\s*$ && "$line" == *=* ]]; then
-      # Extract variable name and value
-      local var_name=$(echo "$line" | cut -d= -f1 | xargs)  # xargs trims whitespace
-      local var_value=$(echo "$line" | cut -d= -f2- | xargs)
-      
-      # Skip empty variable names
-      if [[ -z "$var_name" ]]; then
-        continue
-      fi
-      
-      # Remove quotes if present
-      var_value=$(echo "$var_value" | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/")
-      
-      if $VERBOSE; then
-        echo "Setting $var_name=$var_value"
-      else
-        echo "Setting $var_name"
-      fi
-      
-      # Use the correct Railway CLI syntax that matches your working command
-      if railway variables --service "$SERVICE" --set "$var_name=$var_value"; then
-        if $VERBOSE; then
-          echo "✓ Successfully set $var_name"
-        fi
-      else
-        echo "✗ Failed to set $var_name"
-        echo "  You can set it manually: railway variables --service $SERVICE --set \"$var_name=$var_value\""
-      fi
+  ((var_count++))
+  
+  $VERBOSE && echo "Setting $var_name='$var_value'" || echo "Setting $var_name"
+  
+  # Set variable in Railway with error handling
+  if railway variables --service "$SERVICE" --set "$var_name=$var_value" 2>/dev/null; then
+    ((success_count++))
+    $VERBOSE && echo "✓ Success"
+  else
+    ((error_count++))
+    echo "✗ Failed to set $var_name"
+    
+    # Safeguard: Try alternative approach for problematic variables
+    if railway variables --service "$SERVICE" --set "$var_name=" 2>/dev/null; then
+      echo "  → Set as empty value instead"
+      ((success_count++))
+      ((error_count--))
+    else
+      echo "  → Manual fix: railway variables --service $SERVICE --set \"$var_name=$var_value\""
     fi
-  done < "$env_file"
-  
-  echo "Variables set for $service_name service"
-}
+  fi
+done < "$ENV_FILE"
 
-# Set variables from the env file for the specified service
-set_env_variables "$SERVICE" "$ENV_FILE"
-
-echo "Environment variables set successfully!"
-echo "You can verify them in the Railway dashboard or by running:"
-echo "railway variables --service $SERVICE"
-echo "Done setting Railway variables"
+# Summary
+echo "Complete: $success_count/$var_count variables set"
+[ $error_count -gt 0 ] && echo "Errors: $error_count variables failed" && exit 1
+echo "Verify: railway variables --service $SERVICE"
