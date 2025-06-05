@@ -128,9 +128,9 @@ get_postgres_vars() {
     print_status "Retrieving PostgreSQL connection variables..."
     
     # Get DATABASE_PUBLIC_URL from postgres service (automatically named "Postgres")
-    DB_URL=$(railway variables --service "Postgres" --json 2>/dev/null | jq -r '.DATABASE_PUBLIC_URL // empty' 2>/dev/null || echo "")
+    REFLEX_DB_URL=$(railway variables --service "Postgres" --json 2>/dev/null | jq -r '.DATABASE_PUBLIC_URL // empty' 2>/dev/null || echo "")
     
-    if [ -z "$DB_URL" ]; then
+    if [ -z "$REFLEX_DB_URL" ]; then
         print_warning "Could not retrieve DATABASE_PUBLIC_URL from PostgreSQL service"
         print_status "This is normal if the service is still starting up"
         print_status "DATABASE_PUBLIC_URL will be available once PostgreSQL is fully deployed"
@@ -138,10 +138,10 @@ get_postgres_vars() {
     fi
     
     print_success "DATABASE_PUBLIC_URL retrieved successfully"
-    export DB_URL
+    export REFLEX_DB_URL
     
-    # Update .env file with DB_URL
-    update_env_variable "DB_URL" "$DB_URL" "$ENV_FILE"
+    # Update .env file with REFLEX_DB_URL
+    update_env_variable "REFLEX_DB_URL" "$REFLEX_DB_URL" "$ENV_FILE"
 }
 
 # Run database initialization and migrations
@@ -151,16 +151,16 @@ run_db_migrations() {
         return 0
     fi
     
-    if [ -z "$DB_URL" ]; then
-        print_warning "DB_URL not available, skipping database initialization and migrations"
+    if [ -z "$REFLEX_DB_URL" ]; then
+        print_warning "REFLEX_DB_URL not available, skipping database initialization and migrations"
         print_status "You may need to run 'reflex db init' and 'reflex db migrate' manually after deployment"
         return 0
     fi
     
     print_status "Initializing database schema..."
     
-    # Set DB_URL for the migration
-    export DB_URL
+    # Set REFLEX_DB_URL for the migration
+    export REFLEX_DB_URL
     
     # Run reflex db init first
     if reflex db init; then
@@ -220,7 +220,7 @@ setup_environment_variables() {
         update_env_variable "API_URL" "$API_URL" "$ENV_FILE"
     fi
     
-    # Note: DB_URL is already set in .env file by get_postgres_vars function
+    # Note: REFLEX_DB_URL is already set in .env file by get_postgres_vars function
     
     # Check if set_railway_vars.sh exists before using it
     if [ ! -f "$DEPLOY_DIR/set_railway_vars.sh" ]; then
@@ -401,14 +401,14 @@ else
 fi
 
 # Set default values if not provided in .env
-APP_NAME=${APP_NAME:-"reflex_railway_deployment"}
+REFLEX_APP_NAME=${REFLEX_APP_NAME:-"reflex_railway_deployment"}
 FRONTEND_NAME=${FRONTEND_NAME:-"frontend"}
 BACKEND_NAME=${BACKEND_NAME:-"backend"}
 
 # Display configuration
 print_header "Reflex Railway Deployment"
 echo "Configuration:"
-echo "  • App Name: $APP_NAME"
+echo "  • App Name: $REFLEX_APP_NAME"
 echo "  • Frontend Service: $FRONTEND_NAME"
 echo "  • Backend Service: $BACKEND_NAME"
 echo "  • PostgreSQL Service: Postgres (auto-named by Railway)"
