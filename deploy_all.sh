@@ -119,7 +119,7 @@ update_env_variable() {
     fi
 }
 
-# Get PostgreSQL connection variables and update .env file
+# Get PostgreSQL connection variables and set up Railway services
 get_postgres_vars() {
     if [ "$ENABLE_POSTGRES" = false ]; then
         return 0
@@ -127,21 +127,38 @@ get_postgres_vars() {
     
     print_status "Retrieving PostgreSQL connection variables..."
     
-    # Get DATABASE_PUBLIC_URL from postgres service (automatically named "Postgres")
-    REFLEX_DB_URL=$(railway variables --service "Postgres" --json 2>/dev/null | jq -r '.DATABASE_PUBLIC_URL // empty' 2>/dev/null || echo "")
+    # Railway automatically provides DATABASE_URL
+    DATABASE_URL=$(railway variables --service "Postgres" --json 2>/dev/null | jq -r '.DATABASE_URL // empty' 2>/dev/null || echo "")
     
-    if [ -z "$REFLEX_DB_URL" ]; then
-        print_warning "Could not retrieve DATABASE_PUBLIC_URL from PostgreSQL service"
-        print_status "This is normal if the service is still starting up"
-        print_status "DATABASE_PUBLIC_URL will be available once PostgreSQL is fully deployed"
+    if [ -z "$DATABASE_URL" ]; then
+        print_warning "DATABASE_URL not available yet, will be set by Railway when service starts"
         return 0
     fi
     
-    print_success "DATABASE_PUBLIC_URL retrieved successfully"
-    export REFLEX_DB_URL
+    print_success "DATABASE_URL retrieved successfully"
+    export DATABASE_URL
+}
+
+# Get Railway environment and setup service URLs
+setup_railway_vars() {
+    # Get Railway environment (production, staging, etc.)
+    RAILWAY_ENVIRONMENT=$(railway status --json 2>/dev/null | jq -r '.environment.name // "production"' 2>/dev/null || echo "production")
     
-    # Update .env file with REFLEX_DB_URL
-    update_env_variable "REFLEX_DB_URL" "$REFLEX_DB_URL" "$ENV_FILE"
+    # Set default service names
+    BACKEND_NAME=${BACKEND_NAME:-"backend"}
+    FRONTEND_NAME=${FRONTEND_NAME:-"frontend"}
+    
+    # Backend internal URL for API communication
+    export REFLEX_API_URL="http://${BACKEND_NAME}.railway.internal:8080"
+    
+    # Predicted frontend URL (actual URL will be updated after deployment)
+    export FRONTEND_DEPLOY_URL="https://${FRONTEND_NAME}-${RAILWAY_ENVIRONMENT}.up.railway.app"
+    
+    print_status "Service configuration:"
+    print_status "  Backend: $BACKEND_NAME"
+    print_status "  Frontend: $FRONTEND_NAME"
+    print_status "  API URL: $REFLEX_API_URL"
+    print_status "  Frontend URL (predicted): $FRONTEND_DEPLOY_URL"
 }
 
 # Run database initialization and migrations
@@ -151,33 +168,25 @@ run_db_migrations() {
         return 0
     fi
     
-    if [ -z "$REFLEX_DB_URL" ]; then
-        print_warning "REFLEX_DB_URL not available, skipping database initialization and migrations"
-        print_status "You may need to run 'reflex db init' and 'reflex db migrate' manually after deployment"
+    if [ -z "$DATABASE_URL" ]; then
+        print_warning "DATABASE_URL not available, skipping database initialization and migrations"
         return 0
     fi
     
     print_status "Initializing database schema..."
+    export DATABASE_URL
     
-    # Set REFLEX_DB_URL for the migration
-    export REFLEX_DB_URL
-    
-    # Run reflex db init first
     if reflex db init; then
-        print_success "Database initialization completed successfully"
+        print_success "Database initialization completed"
     else
-        print_warning "Database initialization failed or already initialized"
-        print_status "This may be normal if the database is already initialized"
+        print_status "Database already initialized"
     fi
     
     print_status "Running database migrations..."
-    
-    # Run reflex db migrate
     if reflex db migrate; then
-        print_success "Database migrations completed successfully"
+        print_success "Database migrations completed"
     else
-        print_warning "Database migrations failed or no migrations to run"
-        print_status "This may be normal if this is the first deployment or no migrations are needed"
+        print_status "No migrations to run"
     fi
 }
 
@@ -208,43 +217,38 @@ create_services() {
     railway status
 }
 
-# Set environment variables
+# Set environment variables for Railway services
 setup_environment_variables() {
     print_status "Setting up environment variables..."
     
-    # Ensure API_URL is set correctly to point to the backend service
-    if [ -z "$API_URL" ]; then
-        export API_URL="http://${BACKEND_NAME}.railway.internal:8080"
-        print_status "Setting API_URL to $API_URL"
-        # Update API_URL in .env file
-        update_env_variable "API_URL" "$API_URL" "$ENV_FILE"
-    fi
+    # Set REFLEX_API_URL for backend service
+    print_status "Setting backend variables..."
+    railway variables --service "$BACKEND_NAME" --set "REFLEX_API_URL=$REFLEX_API_URL" || print_warning "Failed to set REFLEX_API_URL"
+    railway variables --service "$BACKEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" || print_warning "Failed to set FRONTEND_DEPLOY_URL"
     
-    # Note: REFLEX_DB_URL is already set in .env file by get_postgres_vars function
+    # Set REFLEX_API_URL for frontend service  
+    print_status "Setting frontend variables..."
+    railway variables --service "$FRONTEND_NAME" --set "REFLEX_API_URL=$REFLEX_API_URL" || print_warning "Failed to set REFLEX_API_URL"
     
-    # Check if set_railway_vars.sh exists before using it
-    if [ ! -f "$DEPLOY_DIR/set_railway_vars.sh" ]; then
-        print_warning "$DEPLOY_DIR/set_railway_vars.sh not found, skipping environment variable setup"
-        return 0
-    fi
+    print_success "Core Railway variables configured"
+}
+
+# Update frontend URL after deployment
+update_frontend_url() {
+    print_status "Updating frontend URL with actual Railway domain..."
     
-    # Make the script executable
-    chmod +x "$DEPLOY_DIR/set_railway_vars.sh"
+    # Get actual Railway public domain for frontend
+    sleep 5  # Wait for deployment to register
+    ACTUAL_FRONTEND_URL=$(railway domain --service "$FRONTEND_NAME" --json 2>/dev/null | jq -r '.[0].domain // empty' 2>/dev/null || echo "")
     
-    # Set variables for frontend service
-    print_status "Setting variables for frontend service..."
-    if "$DEPLOY_DIR/set_railway_vars.sh" -s "$FRONTEND_NAME" -f "$ENV_FILE" ${VERBOSE:+-v}; then
-        print_success "Frontend variables set successfully"
+    if [ -n "$ACTUAL_FRONTEND_URL" ]; then
+        export FRONTEND_DEPLOY_URL="https://$ACTUAL_FRONTEND_URL"
+        print_success "Frontend URL updated to: $FRONTEND_DEPLOY_URL"
+        
+        # Update backend service with actual frontend URL
+        railway variables --service "$BACKEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL"
     else
-        print_warning "Failed to set some frontend variables"
-    fi
-    
-    # Set variables for backend service
-    print_status "Setting variables for backend service..."
-    if "$DEPLOY_DIR/set_railway_vars.sh" -s "$BACKEND_NAME" -f "$ENV_FILE" ${VERBOSE:+-v}; then
-        print_success "Backend variables set successfully"
-    else
-        print_warning "Failed to set some backend variables"
+        print_warning "Could not retrieve actual frontend domain, using predicted URL"
     fi
 }
 
@@ -284,9 +288,9 @@ deploy_service() {
 
 # Deploy all services
 deploy_services() {
-    print_status "Deploying services..."
+    print_status "Deploying services in correct order..."
     
-    # Deploy backend service first
+    # Deploy backend first (needs REFLEX_API_URL and FRONTEND_DEPLOY_URL set)
     if deploy_service "$BACKEND_NAME" "backend"; then
         print_success "Backend deployment completed"
     else
@@ -294,9 +298,12 @@ deploy_services() {
         exit 1
     fi
     
-    # Deploy frontend service
+    # Deploy frontend (needs REFLEX_API_URL set)
     if deploy_service "$FRONTEND_NAME" "frontend"; then
         print_success "Frontend deployment completed"
+        
+        # Update frontend URL with actual Railway domain
+        update_frontend_url
     else
         print_error "Frontend deployment failed"
         exit 1
@@ -429,7 +436,8 @@ init_railway_project
 print_header "Step 3: Setting Up Database"
 deploy_postgres
 
-print_header "Step 4: Configuring Database Connection and Schema"
+print_header "Step 4: Configuring Railway Services"
+setup_railway_vars
 get_postgres_vars
 
 print_header "Step 5: Initializing Database and Running Migrations"

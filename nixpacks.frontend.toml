@@ -18,7 +18,7 @@ providers = ['python']
     dependsOn = ['install'] # run after install (install is the default phase for installing the python modules)
     cmds = ['reflex init'] # re-initialize the app with the latest template
 
-# export backend phase
+# export frontend phase
 [phases.export]
     dependsOn = ['init'] # run after init
     cmds = [
