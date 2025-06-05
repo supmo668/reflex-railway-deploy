@@ -1,5 +1,4 @@
 #!/bin/bash
-#!/bin/bash
 # set_railway_vars.sh - Set Railway environment variables from environment file
 #
 # Usage:
@@ -16,7 +15,7 @@
 #   ./set_railway_vars.sh -s my-service -f .env.prod  # Use .env.prod file
 
 # Default values
-SERVICE=""
+SERVICE="frontend"
 ENV_FILE=".env"
 VERBOSE=false
 
@@ -108,8 +107,13 @@ set_env_variables() {
     # Skip comments and empty lines
     if [[ ! "$line" =~ ^\s*# && ! "$line" =~ ^\s*$ && "$line" == *=* ]]; then
       # Extract variable name and value
-      local var_name=$(echo "$line" | cut -d= -f1)
-      local var_value=$(echo "$line" | cut -d= -f2-)
+      local var_name=$(echo "$line" | cut -d= -f1 | xargs)  # xargs trims whitespace
+      local var_value=$(echo "$line" | cut -d= -f2- | xargs)
+      
+      # Skip empty variable names
+      if [[ -z "$var_name" ]]; then
+        continue
+      fi
       
       # Remove quotes if present
       var_value=$(echo "$var_value" | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/")
@@ -120,7 +124,15 @@ set_env_variables() {
         echo "Setting $var_name"
       fi
       
-      railway variables --service "$SERVICE" --set "$var_name=$var_value"
+      # Use the correct Railway CLI syntax that matches your working command
+      if railway variables --service "$SERVICE" --set "$var_name=$var_value"; then
+        if $VERBOSE; then
+          echo "✓ Successfully set $var_name"
+        fi
+      else
+        echo "✗ Failed to set $var_name"
+        echo "  You can set it manually: railway variables --service $SERVICE --set \"$var_name=$var_value\""
+      fi
     fi
   done < "$env_file"
   
