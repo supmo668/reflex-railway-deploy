@@ -1,43 +1,87 @@
-# Video Player Template
+# Reflex Railway Deployment Template
 
-This repository provides a template for a simple video player application using Reflex. It includes basic state management for video playback.
+This template provides automated deployment of Reflex applications to Railway with minimal configuration and native Railway integration.
 
-## Features
-- Video playback with controls.
+## Environment Variables Overview
 
-## Environment Variables
+This deployment uses three types of environment variables:
 
-The following environment variables are used in the application:
+### 1. Script Arguments/Shell Variables (Set Outside .env)
 
-| Variable | Description | Required for App | Required for Setup | Default | Used In |
-|----------|-------------|----------------|-------------------|---------|---------|
-| `APP_NAME` | Name of the application used for internal routing | No | Yes | reflex_railway_deployment | Backend, Frontend |
-| `FRONTEND_NAME` | Name for frontend deployment | No | Yes | frontend | Frontend |
-| `BACKEND_NAME` | Name for backend deployment | No | Yes | backend | Backend |
-| `FRONTEND_DOMAIN` | Domain for frontend deployment | No | Yes | frontend | Frontend |
-| `REFLEX_ENV_MODE` | Environment mode for Reflex application | No (defaulted) | No | prod | Nixpacks (Backend, Frontend) |
-| `FRONTEND_DEPLOY_URL` | URL for frontend deployment | Yes | No | - | Backend |
-| `API_URL` | URL for backend API (points to internal backend service name) | Yes | No | - | Frontend |
-| `DB_URL` | PostgreSQL database connection URL (automatically set by Railway) | Yes (if using DB) | No | - | Backend |
+These are set via terminal commands or passed as arguments to the deployment script:
 
+| Variable | Default Value | Purpose | How to Set |
+|----------|---------------|---------|------------|
+| `BACKEND_NAME` | `"backend"` | Railway backend service name | `export BACKEND_NAME="my-backend"` |
+| `FRONTEND_NAME` | `"frontend"` | Railway frontend service name | `export FRONTEND_NAME="my-frontend"` |
+| `ENABLE_POSTGRES` | `true` | Enable/disable PostgreSQL deployment | `export ENABLE_POSTGRES=false` |
 
-## Environment Variable Clarification
+### 2. Railway-Managed Variables (Automatic)
 
-### Variables Required for Application Runtime
-Only these variables are strictly necessary for the application to run properly:
+These are automatically provided by Railway when services are deployed:
 
-- `FRONTEND_DEPLOY_URL`: The URL where your frontend is deployed (used by the backend)
-- `API_URL`: The URL for your backend API (used by the frontend). it must point to the internal backend service name defined when setting up with `railway add --service backend`. For example, if your backend service is named 'backend', your API_URL would be 'http://backend:8080'.
-- `REFLEX_ENV`: The environment mode for Reflex (defaults to "prod" for production deployment)
-- `DB_URL`: PostgreSQL database connection URL (automatically provided by Railway when PostgreSQL service is deployed)
+| Variable | Purpose | Managed By |
+|----------|---------|------------|
+| `RAILWAY_PUBLIC_DOMAIN` | Frontend public URL | Railway (automatic) |
+| `DATABASE_URL` | PostgreSQL connection string | Railway PostgreSQL service |
+| `PORT` | Service port | Railway (automatic) |
 
-### Variables Required for Deploymsent Setup
-These variables are needed during the Railway setup process but are not required for the application to run:
+### 3. Deployment Script Variables (Set by deploy_all.sh)
 
-- `APP_NAME`: Used for internal routing and naming
-- `FRONTEND_NAME`: Used when creating the frontend service
-- `BACKEND_NAME`: Used when creating the backend service
-- `FRONTEND_DOMAIN`: Used for domain configuration
+These are calculated and set by the deployment script for Railway services:
+
+| Variable | Purpose | Value |
+|----------|---------|-------|
+| `REFLEX_API_URL` | Backend internal communication | `http://{BACKEND_NAME}.railway.internal:8080` |
+| `FRONTEND_DEPLOY_URL` | CORS origin configuration | Actual Railway frontend domain |
+| `REFLEX_DB_URL` | Database connection for Reflex | Same as `DATABASE_URL` from PostgreSQL service |
+
+## Quick Start
+
+1. **Set service names** (optional, uses defaults if not set):
+   ```bash
+   export BACKEND_NAME="my-backend"     # Default: "backend"
+   export FRONTEND_NAME="my-frontend"   # Default: "frontend"
+   ```
+
+2. **Create your .env file** for application-specific variables:
+   ```bash
+   # Copy the template and edit with your app's variables
+   cp .env.template .env
+   # Edit .env with your OPENAI_API_KEY, CLERK_SECRET_KEY, etc.
+   ```
+
+3. **Deploy everything**:
+   ```bash
+   chmod +x deploy_all.sh
+   ./deploy_all.sh
+   ```
+
+## What the Script Does
+
+1. **Service Setup**:
+   - Creates PostgreSQL service (auto-named "Postgres")
+   - Creates backend service with name from `$BACKEND_NAME`
+   - Creates frontend service with name from `$FRONTEND_NAME`
+
+2. **Variable Configuration**:
+   - Sets `REFLEX_API_URL` for internal service communication
+   - Configures `FRONTEND_DEPLOY_URL` for CORS using actual Railway domain
+   - Sets `REFLEX_DB_URL` from PostgreSQL `DATABASE_URL`
+   - Updates your `.env` file with deployment variables
+   - Preserves all variables from your `.env` file
+
+3. **Deployment Order**:
+   - PostgreSQL → Backend → Frontend
+   - Runs database migrations after PostgreSQL is ready
+   - Updates frontend URL with actual Railway domain
+
+## Railway Service Communication
+
+- **Internal API calls**: Use `REFLEX_API_URL` (points to `{BACKEND_NAME}.railway.internal:8080`)
+- **Public frontend**: Use `RAILWAY_PUBLIC_DOMAIN` (set by Railway automatically)
+- **Database**: Use `DATABASE_URL` (provided by Railway PostgreSQL service)
+- **CORS**: Configured automatically using the actual frontend domain
 
 
 ## Setup
@@ -47,10 +91,10 @@ These variables are needed during the Railway setup process but are not required
 pip install -r requirements.txt
 ```
 3. Set up environment variables:
-   - Copy `.env.example` to `.env`
+   - Copy `.env.template` to `.env`
    - Update the values in `.env` with your credentials
 ```bash
-cp .env.example .env
+cp .env.template .env
 ```
 4. Run the application.
 
@@ -183,69 +227,47 @@ railway environment
   - `Referrer-Policy: strict-origin-when-cross-origin`
 - CORS headers allow credentials and specify allowed methods and headers.
 
-### 3. Environment Variables for Deployment
+### Application-Specific Variables (.env file)
 
-1. Create a `.env` file by copying and modifying the template:
-   ```bash
-   cp .env.template .env
-   # Edit .env with your specific values
-   ```
+Create a `.env` file for your application-specific variables (API keys, secrets, etc.):
 
-   > **Important**: The `.env` file should include both Railway deployment variables AND your application-specific variables. If your app already has an `.env` file, merge the contents of `.env.template` with your existing `.env` file.
+```bash
+# Copy the template and edit with your app's variables
+cp .env.template .env
+```
 
-2. Configure your environment variables in `.env` file (example):
-   ```bash
-   # Common variables
-   APP_NAME=my-reflex-app
-   FRONTEND_NAME=frontend
-   BACKEND_NAME=backend
-   
-   # Your app-specific variables
-   DATABASE_URL=postgresql://postgres:postgres@db.railway.internal:5432/railway
-   OPENAI_API_KEY=sk-your-api-key
-   ```
+Example `.env` file:
+```bash
+# Your application secrets (these will be set on Railway services)
+OPENAI_API_KEY=sk-your-api-key-here
+CLERK_SECRET_KEY=sk_test_your-clerk-secret
+STRIPE_SECRET_KEY=sk_test_your-stripe-secret
 
-3. Set all variables in Railway automatically using the provided script:
-   ```bash
-   # Make sure you're logged in to Railway CLI first
-   railway login
-   
-   # Make the script executable
-   chmod +x set_railway_vars.sh
-   
-   # Run the script with your .env file for your backend service
-   ./set_railway_vars.sh -s backend -f .env
-   
-   # Run again for your frontend service
-   ./set_railway_vars.sh -s frontend -f .env
-   ```
+# Other app-specific config
+APP_NAME=my-reflex-app
+ENVIRONMENT=production
+```
 
-   The script supports these options:
-   ```
-   Options:
-     -h, --help                 Show help message
-     -s, --service SERVICE      Service name to update in Railway (required)
-     -f, --file FILENAME        Environment file to use [default: .env]
-     -v, --verbose              Enable verbose output (shows variable values)
-   ```
+**Important Notes:**
+- ❌ **Do NOT** put `BACKEND_NAME`, `FRONTEND_NAME`, or `ENABLE_POSTGRES` in `.env`
+- ❌ **Do NOT** put `REFLEX_API_URL` or `FRONTEND_DEPLOY_URL` in `.env`
+- ✅ **Do** put your application secrets and configuration in `.env`
+- ✅ The deployment script automatically reads your `.env` and sets variables on Railway services
 
-   This script will:
-   - Set only the variables defined in your .env file to the specified Railway service
-   - Skip comments and empty lines in the .env file
-   - Handle quoted values properly
-   - Display which variables are being set (use -v to see their values)
+### Manual Variable Management (Optional)
 
-4. Important notes about variables:
-   - You'll need to run the script separately for each service
-   - All variables from your .env file will be transferred to the specified service
-   - Make sure your .env contains all necessary variables for both frontend and backend services
-   - Remember that `API_URL` should point to your backend service name (e.g., `http://spyglass:8080`)
+If you need to manually manage variables, you can use the Railway CLI:
 
-5. Verify your variables in the Railway dashboard or using the CLI:
-   ```bash
-   railway variables --service frontend
-   railway variables --service backend
-   ```
+```bash
+# Set variables for a specific service
+railway variables --service backend --set "OPENAI_API_KEY=sk-your-key"
+
+# View all variables for a service
+railway variables --service backend
+
+# Set multiple variables from your .env file (done automatically by deploy_all.sh)
+./set_railway_vars.sh -s backend -f .env
+```
 
 ### Automated Deployment with deploy_all.sh
 
@@ -387,9 +409,82 @@ https://<frontend-name>.up.railway.app
 
 ## Troubleshooting
 
-- **Connection Issues**: Ensure that FRONTEND_ORIGIN and BACKEND_INTERNAL_URL are correctly set
-- **Deployment Failures**: Check Railway logs with `railway logs --service <service-name>`
-- **Environment Variables**: Verify all required variables are set with `railway variables --service <service-name>`
+### Common Issues
+
+**Service Names Not Found**
+- Check that `BACKEND_NAME` and `FRONTEND_NAME` are set correctly
+- Verify services exist: `railway service list`
+
+**Database Connection Issues**
+- Ensure PostgreSQL service is deployed first
+- Check `DATABASE_URL` is available: `railway variables --service Postgres`
+
+**CORS/API Connection Issues**
+- The deployment script automatically configures `REFLEX_API_URL` and `FRONTEND_DEPLOY_URL`
+- Check internal communication: Backend should be accessible at `{BACKEND_NAME}.railway.internal:8080`
+
+**Environment Variable Issues**
+- **For app secrets**: Add them to your `.env` file (not as shell exports)
+- **For service names**: Set as shell variables (`export BACKEND_NAME="my-backend"`)
+- **For Railway variables**: These are automatic (`DATABASE_URL`, `RAILWAY_PUBLIC_DOMAIN`)
+
+**Deployment Failures**
+- Check Railway logs: `railway logs --service <service-name>`
+- Verify all required variables: `railway variables --service <service-name>`
+- Ensure Railway CLI is authenticated: `railway whoami`
+
+### Debug Commands
+
+```bash
+# Check service status
+railway status
+
+# View service logs
+railway logs --service backend
+railway logs --service frontend
+
+# List all variables for a service
+railway variables --service backend
+
+# Test internal connectivity (from within Railway)
+# Backend should be accessible at: {BACKEND_NAME}.railway.internal:8080
+```
+
+## Complete Deployment Example
+
+Here's a complete example of deploying a Reflex app with custom service names:
+
+```bash
+# 1. Navigate to your deployment directory
+cd reflex-railway-deploy
+
+# 2. Create your .env file with app secrets
+cp .env.template .env
+# Edit .env and add your OPENAI_API_KEY, CLERK_SECRET_KEY, etc.
+
+# 3. Set custom service names (optional - defaults to "backend"/"frontend")
+export BACKEND_NAME="myapp-api"
+export FRONTEND_NAME="myapp-web"
+
+# 4. Login to Railway (if not already logged in)
+railway login
+
+# 5. Deploy everything automatically
+chmod +x deploy_all.sh
+./deploy_all.sh
+
+# 6. View your deployed app
+# Frontend: https://myapp-web-production.up.railway.app
+# Backend API: Internal to Railway network
+```
+
+**Result**: Your app will be deployed with:
+- PostgreSQL service named "Postgres"  
+- Backend service named "myapp-api"
+- Frontend service named "myapp-web"
+- All environment variables properly configured
+- Internal service communication working
+- CORS configured for the actual frontend domain
 
 ## Additional Resources
 

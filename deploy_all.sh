@@ -1,456 +1,200 @@
 #!/bin/bash
 # deploy_all.sh - Deploy Reflex application to Railway
-# This script should be placed in the root directory of your Reflex application (where rxconfig.py is)
 
-set -e  # Exit on any error
+set -e
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+# Colors and logging
+RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[1;33m' BLUE='\033[0;34m' NC='\033[0m'
+log() { echo -e "${BLUE}[INFO]${NC} $1"; }
+success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
+warn() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
+error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+header() { echo -e "${BLUE}================ $1 ================${NC}"; }
 
-# Utility functions
-print_status() {
-    echo -e "${BLUE}[INFO]${NC} $1"
-}
-
-print_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-print_header() {
-    echo -e "${BLUE}================================${NC}"
-    echo -e "${BLUE}$1${NC}"
-    echo -e "${BLUE}================================${NC}"
-}
-
-# Check if railway CLI is installed
-check_railway_cli() {
-    if ! command -v railway &> /dev/null; then
-        print_error "Railway CLI not found. Please install it first:"
-        echo "npm i -g @railway/cli"
-        exit 1
-    fi
-    print_success "Railway CLI found"
-}
-
-# Check if logged in to Railway
-check_railway_auth() {
-    if ! railway whoami &> /dev/null; then
-        print_error "Not logged in to Railway. Please run 'railway login' first"
-        exit 1
-    fi
-    print_success "Railway authentication verified"
+# Validate environment
+validate_env() {
+    command -v railway &> /dev/null || error "Railway CLI not found. Install with: npm i -g @railway/cli"
+    railway whoami &> /dev/null || error "Not logged in to Railway. Run 'railway login' first"
+    success "Environment validated"
 }
 
 # Initialize Railway project
-init_railway_project() {
-    print_status "Checking Railway project status..."
-    
+init_project() {
     if ! railway status &> /dev/null; then
-        print_status "No Railway project linked. Creating a new project..."
-        railway init || { print_error "Failed to initialize Railway project"; exit 1; }
-        print_success "Railway project initialized"
-    else
-        print_success "Railway project already linked"
+        log "Creating Railway project..."
+        railway init || error "Failed to initialize Railway project"
     fi
+    success "Railway project ready"
 }
 
-# Deploy PostgreSQL service
+# Deploy PostgreSQL
 deploy_postgres() {
-    if [ "$ENABLE_POSTGRES" = false ]; then
-        print_status "PostgreSQL deployment skipped (disabled)"
-        return 0
-    fi
+    [ "$ENABLE_POSTGRES" = false ] && { log "PostgreSQL skipped"; return 0; }
     
-    print_status "Setting up PostgreSQL service..."
-    
-    # Check if postgres service already exists
     if railway service list 2>/dev/null | grep -q "Postgres"; then
-        print_success "PostgreSQL service already exists"
+        success "PostgreSQL already exists"
         return 0
     fi
     
-    # Add PostgreSQL service using database template (automatically named "Postgres")
-    print_status "Adding PostgreSQL service..."
-    railway add -d postgres || { print_error "Failed to add PostgreSQL service"; exit 1; }
-    
-    # Wait for deployment
-    print_status "Waiting for PostgreSQL deployment (this may take a minute)..."
+    log "Adding PostgreSQL service..."
+    railway add -d postgres || error "Failed to add PostgreSQL service"
     sleep 15
-    
-    # Check deployment status
-    print_status "Checking PostgreSQL deployment status..."
-    railway status --service "Postgres" || print_warning "Could not verify PostgreSQL status"
-    
-    print_success "PostgreSQL service deployed"
+    success "PostgreSQL deployed"
 }
 
-# Function to update environment variable in .env file
-update_env_variable() {
-    local var_name=$1
-    local var_value=$2
-    local env_file=$3
+# Update environment variable in .env file
+update_env() {
+    local var_name=$1 var_value=$2 env_file=$3
+    [ -z "$var_name" ] || [ -z "$var_value" ] || [ -z "$env_file" ] && { error "update_env: Missing parameters"; }
     
-    if [ -z "$var_name" ] || [ -z "$var_value" ] || [ -z "$env_file" ]; then
-        print_error "update_env_variable: Missing required parameters"
-        return 1
-    fi
-    
-    # Use sed to replace existing variable line or add it if it doesn't exist
     if grep -q "^${var_name}=" "$env_file" 2>/dev/null; then
-        # Replace existing variable line
         sed -i "s|^${var_name}=.*|${var_name}=${var_value}|" "$env_file"
-        print_success "Updated ${var_name} in $env_file"
     else
-        # Add variable if it doesn't exist
         echo "${var_name}=${var_value}" >> "$env_file"
-        print_success "Added ${var_name} to $env_file"
     fi
 }
 
-# Get PostgreSQL connection variables and set up Railway services
-get_postgres_vars() {
-    if [ "$ENABLE_POSTGRES" = false ]; then
-        return 0
-    fi
-    
-    print_status "Retrieving PostgreSQL connection variables..."
-    
-    # Railway automatically provides DATABASE_URL
-    DATABASE_URL=$(railway variables --service "Postgres" --json 2>/dev/null | jq -r '.DATABASE_URL // empty' 2>/dev/null || echo "")
-    
-    if [ -z "$DATABASE_URL" ]; then
-        print_warning "DATABASE_URL not available yet, will be set by Railway when service starts"
-        return 0
-    fi
-    
-    print_success "DATABASE_URL retrieved successfully"
-    export DATABASE_URL
-}
-
-# Get Railway environment and setup service URLs
-setup_railway_vars() {
-    # Get Railway environment (production, staging, etc.)
-    RAILWAY_ENVIRONMENT=$(railway status --json 2>/dev/null | jq -r '.environment.name // "production"' 2>/dev/null || echo "production")
-    
-    # Set default service names
+# Setup Railway variables and database
+setup_vars() {
+    # Service configuration
     BACKEND_NAME=${BACKEND_NAME:-"backend"}
     FRONTEND_NAME=${FRONTEND_NAME:-"frontend"}
+    RAILWAY_ENVIRONMENT=$(railway status --json 2>/dev/null | jq -r '.environment.name // "production"' 2>/dev/null || echo "production")
     
-    # Backend internal URL for API communication
+    # Set URLs
     export REFLEX_API_URL="http://${BACKEND_NAME}.railway.internal:8080"
-    
-    # Predicted frontend URL (actual URL will be updated after deployment)
     export FRONTEND_DEPLOY_URL="https://${FRONTEND_NAME}-${RAILWAY_ENVIRONMENT}.up.railway.app"
     
-    print_status "Service configuration:"
-    print_status "  Backend: $BACKEND_NAME"
-    print_status "  Frontend: $FRONTEND_NAME"
-    print_status "  API URL: $REFLEX_API_URL"
-    print_status "  Frontend URL (predicted): $FRONTEND_DEPLOY_URL"
+    # Get database URL if PostgreSQL enabled
+    if [ "$ENABLE_POSTGRES" = true ]; then
+        DATABASE_URL=$(railway variables --service "Postgres" --json 2>/dev/null | jq -r '.DATABASE_URL // empty' 2>/dev/null || echo "")
+        if [ -n "$DATABASE_URL" ]; then
+            export DATABASE_URL REFLEX_DB_URL="$DATABASE_URL"
+            update_env "REFLEX_DB_URL" "$REFLEX_DB_URL" "$ENV_FILE"
+        fi
+    fi
+    
+    # Update .env with all variables
+    update_env "REFLEX_API_URL" "$REFLEX_API_URL" "$ENV_FILE"
+    update_env "FRONTEND_DEPLOY_URL" "$FRONTEND_DEPLOY_URL" "$ENV_FILE"
+    
+    log "Variables configured: Backend=$BACKEND_NAME, Frontend=$FRONTEND_NAME"
 }
 
-# Run database initialization and migrations
-run_db_migrations() {
-    if [ "$ENABLE_POSTGRES" = false ]; then
-        print_status "Database initialization and migrations skipped (PostgreSQL disabled)"
-        return 0
-    fi
+# Run database migrations
+run_migrations() {
+    [ "$ENABLE_POSTGRES" = false ] || [ -z "$DATABASE_URL" ] && return 0
     
-    if [ -z "$DATABASE_URL" ]; then
-        print_warning "DATABASE_URL not available, skipping database initialization and migrations"
-        return 0
-    fi
-    
-    print_status "Initializing database schema..."
+    log "Running database setup..."
     export DATABASE_URL
-    
-    if reflex db init; then
-        print_success "Database initialization completed"
-    else
-        print_status "Database already initialized"
-    fi
-    
-    print_status "Running database migrations..."
-    if reflex db migrate; then
-        print_success "Database migrations completed"
-    else
-        print_status "No migrations to run"
-    fi
+    REFLEX_DB_URL=$DATABASE_URL reflex db init 2>/dev/null || true
+    REFLEX_DB_URL=$DATABASE_URL reflex db migrate 2>/dev/null || true
+    success "Database ready"
 }
 
-# Create Railway services
-create_services() {
-    print_status "Creating Railway services..."
+# Create and configure services
+setup_services() {
+    log "Creating Railway services..."
     
-    # Add frontend service
-    if railway service list 2>/dev/null | grep -q "$FRONTEND_NAME"; then
-        print_success "Frontend service '$FRONTEND_NAME' already exists"
-    else
-        print_status "Creating frontend service: $FRONTEND_NAME"
-        railway add --service "$FRONTEND_NAME" || { print_error "Failed to create frontend service"; exit 1; }
-        print_success "Frontend service created"
-    fi
+    # Create services if they don't exist
+    for service in "$FRONTEND_NAME" "$BACKEND_NAME"; do
+        if ! railway service list 2>/dev/null | grep -q "$service"; then
+            railway add --service "$service" || error "Failed to create $service service"
+        fi
+    done
     
-    # Add backend service
-    if railway service list 2>/dev/null | grep -q "$BACKEND_NAME"; then
-        print_success "Backend service '$BACKEND_NAME' already exists"
-    else
-        print_status "Creating backend service: $BACKEND_NAME"
-        railway add --service "$BACKEND_NAME" || { print_error "Failed to create backend service"; exit 1; }
-        print_success "Backend service created"
-    fi
+    # Sync variables to Railway services
+    chmod +x "$DEPLOY_DIR/set_railway_vars.sh" 2>/dev/null || error "set_railway_vars.sh not found in $DEPLOY_DIR"
     
-    # Verify services were created
-    print_status "Verifying services..."
-    railway status
+    for service in "$BACKEND_NAME" "$FRONTEND_NAME"; do
+        "$DEPLOY_DIR/set_railway_vars.sh" -s "$service" -f "$ENV_FILE" || error "Failed to sync variables to $service"
+    done
+    
+    success "Services configured"
 }
 
-# Set environment variables for Railway services
-setup_environment_variables() {
-    print_status "Setting up environment variables..."
+# Deploy service
+deploy_service() {
+    local service_name=$1 service_type=$2
     
-    # Set REFLEX_API_URL for backend service
-    print_status "Setting backend variables..."
-    railway variables --service "$BACKEND_NAME" --set "REFLEX_API_URL=$REFLEX_API_URL" || print_warning "Failed to set REFLEX_API_URL"
-    railway variables --service "$BACKEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" || print_warning "Failed to set FRONTEND_DEPLOY_URL"
+    log "Deploying $service_type: $service_name"
     
-    # Set REFLEX_API_URL for frontend service  
-    print_status "Setting frontend variables..."
-    railway variables --service "$FRONTEND_NAME" --set "REFLEX_API_URL=$REFLEX_API_URL" || print_warning "Failed to set REFLEX_API_URL"
+    # Copy config files
+    cp "$DEPLOY_DIR/Caddyfile.$service_type" Caddyfile || error "Caddyfile.$service_type not found"
+    cp "$DEPLOY_DIR/nixpacks.$service_type.toml" nixpacks.toml || error "nixpacks.$service_type.toml not found"
     
-    print_success "Core Railway variables configured"
+    # Deploy
+    railway service "$service_name" || error "Failed to select $service_name"
+    railway up || error "Failed to deploy $service_name"
+    
+    success "$service_type deployed"
 }
 
 # Update frontend URL after deployment
 update_frontend_url() {
-    print_status "Updating frontend URL with actual Railway domain..."
+    sleep 5
+    REFLEX_PUBLIC_DOMAIN=$(railway variables --service "$FRONTEND_NAME" --json 2>/dev/null | jq -r '.REFLEX_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
     
-    # Get actual Railway public domain for frontend
-    sleep 5  # Wait for deployment to register
-    ACTUAL_FRONTEND_URL=$(railway domain --service "$FRONTEND_NAME" --json 2>/dev/null | jq -r '.[0].domain // empty' 2>/dev/null || echo "")
-    
-    if [ -n "$ACTUAL_FRONTEND_URL" ]; then
-        export FRONTEND_DEPLOY_URL="https://$ACTUAL_FRONTEND_URL"
-        print_success "Frontend URL updated to: $FRONTEND_DEPLOY_URL"
-        
-        # Update backend service with actual frontend URL
-        railway variables --service "$BACKEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL"
-    else
-        print_warning "Could not retrieve actual frontend domain, using predicted URL"
+    if [ -n "$REFLEX_PUBLIC_DOMAIN" ]; then
+        export FRONTEND_DEPLOY_URL="https://$REFLEX_PUBLIC_DOMAIN"
+        update_env "FRONTEND_DEPLOY_URL" "$FRONTEND_DEPLOY_URL" "$ENV_FILE"
+        "$DEPLOY_DIR/set_railway_vars.sh" -s "$BACKEND_NAME" -f "$ENV_FILE" 2>/dev/null || warn "Failed to update backend with new frontend URL"
+        success "Frontend URL updated: $FRONTEND_DEPLOY_URL"
     fi
-}
-
-# Deploy a single service
-deploy_service() {
-    local service_name=$1
-    local service_type=$2  # "frontend" or "backend"
-    
-    print_status "Deploying $service_type service: $service_name"
-    
-    # Check if configuration files exist before copying
-    if [ ! -f "$DEPLOY_DIR/Caddyfile.$service_type" ]; then
-        print_error "$DEPLOY_DIR/Caddyfile.$service_type not found"
-        return 1
-    fi
-    
-    if [ ! -f "$DEPLOY_DIR/nixpacks.$service_type.toml" ]; then
-        print_error "$DEPLOY_DIR/nixpacks.$service_type.toml not found"
-        return 1
-    fi
-    
-    # Copy the appropriate Caddyfile and nixpacks.toml
-    print_status "Copying $service_type configuration files..."
-    cp "$DEPLOY_DIR/Caddyfile.$service_type" Caddyfile || { print_error "Failed to copy Caddyfile"; return 1; }
-    cp "$DEPLOY_DIR/nixpacks.$service_type.toml" nixpacks.toml || { print_error "Failed to copy nixpacks.toml"; return 1; }
-    
-    # Select the service
-    print_status "Selecting service: $service_name"
-    railway service "$service_name" || { print_error "Failed to select service $service_name"; return 1; }
-    
-    # Deploy the service
-    print_status "Deploying $service_name (this may take several minutes)..."
-    railway up || { print_error "Failed to deploy $service_name"; return 1; }
-    
-    print_success "$service_type service deployed successfully!"
 }
 
 # Deploy all services
-deploy_services() {
-    print_status "Deploying services in correct order..."
-    
-    # Deploy backend first (needs REFLEX_API_URL and FRONTEND_DEPLOY_URL set)
-    if deploy_service "$BACKEND_NAME" "backend"; then
-        print_success "Backend deployment completed"
-    else
-        print_error "Backend deployment failed"
-        exit 1
-    fi
-    
-    # Deploy frontend (needs REFLEX_API_URL set)
-    if deploy_service "$FRONTEND_NAME" "frontend"; then
-        print_success "Frontend deployment completed"
-        
-        # Update frontend URL with actual Railway domain
-        update_frontend_url
-    else
-        print_error "Frontend deployment failed"
-        exit 1
-    fi
+deploy_all() {
+    log "Deploying services..."
+    deploy_service "$BACKEND_NAME" "backend"
+    deploy_service "$FRONTEND_NAME" "frontend"
+    update_frontend_url
+    success "All services deployed"
 }
 
-# Display final status and URLs
-show_deployment_summary() {
-    print_header "Deployment Complete"
-    echo ""
-    print_success "Your Reflex application has been deployed to Railway!"
-    echo ""
-    echo "Services deployed:"
-    echo "  • Frontend: https://$FRONTEND_NAME.up.railway.app"
-    echo "  • Backend: https://$BACKEND_NAME.up.railway.app"
-    if [ "$ENABLE_POSTGRES" = true ]; then
-        echo "  • PostgreSQL: Database service running"
-    fi
-    echo ""
-    echo "Useful commands:"
-    echo "  • Check status: railway status"
-    echo "  • View logs: railway logs --service <service-name>"
-    echo "  • View variables: railway variables --service <service-name>"
-    echo ""
-}
+# Main execution
+ENV_FILE=".env" DEPLOY_DIR="reflex-railway-deploy" ENABLE_POSTGRES=true
 
-# Main execution starts here
-
-# Default values
-ENV_FILE=".env"
-DEPLOY_DIR="reflex-railway-deploy"
-VERBOSE=false
-ENABLE_POSTGRES=true
-
-# Parse command line arguments
+# Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -h|--help)
-            echo "Usage: $0 [options]"
-            echo ""
-            echo "Options:"
-            echo "  -h, --help                 Show this help message"
-            echo "  -f, --file FILENAME        Environment file to use [default: .env]"
-            echo "  -d, --deploy-dir DIRNAME   Directory containing deployment files [default: reflex-railway-deploy]"
-            echo "  -v, --verbose              Enable verbose output"
-            echo "  --no-postgres              Skip PostgreSQL service deployment"
-            echo "  --postgres                 Enable PostgreSQL service deployment [default]"
-            echo ""
-            echo "Examples:"
-            echo "  $0                         Deploy with default settings"
-            echo "  $0 --no-postgres           Deploy without PostgreSQL"
-            echo "  $0 -f .env.prod -v         Deploy with custom env file and verbose output"
-            echo ""
-            exit 0
-            ;;
-        -f|--file)
-            ENV_FILE="$2"
-            shift 2
-            ;;
-        -d|--deploy-dir)
-            DEPLOY_DIR="$2"
-            shift 2
-            ;;
-        -v|--verbose)
-            VERBOSE=true
-            shift
-            ;;
-        --no-postgres)
-            ENABLE_POSTGRES=false
-            shift
-            ;;
-        --postgres)
-            ENABLE_POSTGRES=true
-            shift
-            ;;
-        *)
-            print_error "Unknown option: $1"
-            exit 1
-            ;;
+        -h|--help) echo "Usage: $0 [-f file] [-d dir] [--no-postgres]"; exit 0 ;;
+        -f|--file) ENV_FILE="$2"; shift 2 ;;
+        -d|--deploy-dir) DEPLOY_DIR="$2"; shift 2 ;;
+        --no-postgres) ENABLE_POSTGRES=false; shift ;;
+        --postgres) ENABLE_POSTGRES=true; shift ;;
+        *) error "Unknown option: $1" ;;
     esac
 done
 
-# Validate requirements
-if [ ! -f "$ENV_FILE" ]; then
-    print_error "Environment file $ENV_FILE not found"
-    exit 1
-fi
+# Validate and load environment
+[ -f "$ENV_FILE" ] || error "Environment file $ENV_FILE not found"
+[ -d "$DEPLOY_DIR" ] || error "Deploy directory $DEPLOY_DIR not found"
 
-if [ ! -d "$DEPLOY_DIR" ]; then
-    print_error "Deployment directory $DEPLOY_DIR not found"
-    exit 1
-fi
-
-# Load environment variables from file
 if [ -s "$ENV_FILE" ]; then
-    set -a
-    source "$ENV_FILE" || { print_error "Failed to source $ENV_FILE"; exit 1; }
-    set +a
-    print_success "Environment variables loaded from $ENV_FILE"
-else
-    print_warning "$ENV_FILE is empty or missing, using default values"
+    set -a; source "$ENV_FILE" || error "Failed to source $ENV_FILE"; set +a
 fi
 
-# Set default values if not provided in .env
+# Set defaults
 REFLEX_APP_NAME=${REFLEX_APP_NAME:-"reflex_railway_deployment"}
 FRONTEND_NAME=${FRONTEND_NAME:-"frontend"}
 BACKEND_NAME=${BACKEND_NAME:-"backend"}
 
-# Display configuration
-print_header "Reflex Railway Deployment"
-echo "Configuration:"
-echo "  • App Name: $REFLEX_APP_NAME"
-echo "  • Frontend Service: $FRONTEND_NAME"
-echo "  • Backend Service: $BACKEND_NAME"
-echo "  • PostgreSQL Service: Postgres (auto-named by Railway)"
-echo "  • Environment File: $ENV_FILE"
-echo "  • Deploy Directory: $DEPLOY_DIR"
-echo "  • PostgreSQL: $([ "$ENABLE_POSTGRES" = true ] && echo "Enabled" || echo "Disabled")"
-echo "  • Verbose: $([ "$VERBOSE" = true ] && echo "Enabled" || echo "Disabled")"
-echo ""
+# Show config and deploy
+header "Reflex Railway Deployment"
+echo "App: $REFLEX_APP_NAME | Frontend: $FRONTEND_NAME | Backend: $BACKEND_NAME | PostgreSQL: $([ "$ENABLE_POSTGRES" = true ] && echo "Enabled" || echo "Disabled")"
 
-# Execute deployment steps
-print_header "Step 1: Validating Environment"
-check_railway_cli
-check_railway_auth
-
-print_header "Step 2: Initializing Project"
-init_railway_project
-
-print_header "Step 3: Setting Up Database"
+validate_env
+init_project
 deploy_postgres
+setup_vars
+run_migrations
+setup_services
+deploy_all
 
-print_header "Step 4: Configuring Railway Services"
-setup_railway_vars
-get_postgres_vars
-
-print_header "Step 5: Initializing Database and Running Migrations"
-run_db_migrations
-
-print_header "Step 6: Creating Application Services"
-create_services
-
-print_header "Step 7: Configuring Environment Variables"
-setup_environment_variables
-
-print_header "Step 8: Deploying Services"
-deploy_services
-
-# Show final summary
-show_deployment_summary
+# Summary
+header "Deployment Complete"
+echo "✓ Frontend: https://$FRONTEND_NAME.up.railway.app"
+echo "✓ Backend: https://$BACKEND_NAME.up.railway.app"
+[ "$ENABLE_POSTGRES" = true ] && echo "✓ PostgreSQL: Database running"
+echo "Commands: railway status | railway logs --service <name> | railway variables --service <name>"
