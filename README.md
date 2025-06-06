@@ -4,56 +4,54 @@ This template provides automated deployment of Reflex applications to Railway wi
 
 ## Environment Variables Overview
 
-This deployment uses three types of environment variables:
+This deployment uses two types of environment variables:
 
-### 1. Script Arguments/Shell Variables (Set Outside .env)
+### 1. Application Variables (.env file)
 
-These are set via terminal commands or passed as arguments to the deployment script:
+These are your application-specific secrets and configuration variables:
 
-| Variable | Default Value | Purpose | How to Set |
-|----------|---------------|---------|------------|
-| `BACKEND_NAME` | `"backend"` | Railway backend service name | `export BACKEND_NAME="my-backend"` |
-| `FRONTEND_NAME` | `"frontend"` | Railway frontend service name | `export FRONTEND_NAME="my-frontend"` |
-| `ENABLE_POSTGRES` | `true` | Enable/disable PostgreSQL deployment | `export ENABLE_POSTGRES=false` |
+```bash
+# Example .env file
+ADMIN_USER_EMAILS=admin@example.com
+CLERK_SECRET_KEY=sk_test_your-clerk-secret
+OPENAI_API_KEY=sk-your-openai-api-key
+REFLEX_APP_NAME=My Reflex App
+APP_ENV=production
+```
 
-### 2. Railway-Managed Variables (Automatic)
+### 2. Deployment Variables (Automatic)
 
-These are automatically provided by Railway when services are deployed:
+These are automatically set by the deployment script:
 
-| Variable | Purpose | Managed By |
-|----------|---------|------------|
-| `RAILWAY_PUBLIC_DOMAIN` | Frontend public URL | Railway (automatic) |
-| `DATABASE_URL` | PostgreSQL connection string | Railway PostgreSQL service |
-| `PORT` | Service port | Railway (automatic) |
+| Service | Variables Set Automatically |
+|---------|----------------------------|
+| **Backend** | `FRONTEND_DEPLOY_URL` (for CORS)<br>`REFLEX_DB_URL` (from Railway PostgreSQL)<br>+ all variables from .env |
+| **Frontend** | `FRONTEND_DEPLOY_URL` (self-reference)<br>`REFLEX_API_URL` (backend's Railway domain)<br>`REFLEX_DB_URL` (from Railway PostgreSQL)<br>+ all variables from .env |
 
-### 3. Deployment Script Variables (Set by deploy_all.sh)
-
-These are calculated and set by the deployment script for Railway services:
-
-| Variable | Purpose | Value |
-|----------|---------|-------|
-| `REFLEX_API_URL` | Backend internal communication | `http://{BACKEND_NAME}.railway.internal:8080` |
-| `FRONTEND_DEPLOY_URL` | CORS origin configuration | Actual Railway frontend domain |
-| `REFLEX_DB_URL` | Database connection for Reflex | Same as `DATABASE_URL` from PostgreSQL service |
+**Key Points:**
+- ✅ Put your app secrets in `.env` file
+- ❌ **Never** manually set `REFLEX_API_URL`, `FRONTEND_DEPLOY_URL`, or `REFLEX_DB_URL`  
+- 🔄 Deployment script uses `railway domain` to get actual Railway domains
+- 🔗 Backend gets frontend URL for CORS, frontend gets backend URL for API calls
 
 ## Quick Start
 
-1. **Set service names** (optional, uses defaults if not set):
+1. **Create your .env file** with your application secrets:
    ```bash
-   export BACKEND_NAME="my-backend"     # Default: "backend"
-   export FRONTEND_NAME="my-frontend"   # Default: "frontend"
-   ```
-
-2. **Create your .env file** for application-specific variables:
-   ```bash
-   # Copy the template and edit with your app's variables
    cp .env.template .env
-   # Edit .env with your OPENAI_API_KEY, CLERK_SECRET_KEY, etc.
+   # Edit .env with your API keys and configuration
    ```
 
-3. **Deploy everything**:
+2. **Deploy everything**:
    ```bash
    chmod +x deploy_all.sh
+   ./deploy_all.sh
+   ```
+
+3. **Optional: Custom service names**:
+   ```bash
+   export BACKEND_NAME="my-backend" 
+   export FRONTEND_NAME="my-frontend"
    ./deploy_all.sh
    ```
 

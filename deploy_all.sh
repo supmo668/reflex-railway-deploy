@@ -67,18 +67,12 @@ setup_vars() {
     # Service configuration
     BACKEND_NAME=${BACKEND_NAME:-"backend"}
     FRONTEND_NAME=${FRONTEND_NAME:-"frontend"}
-    RAILWAY_ENVIRONMENT=$(railway status --json 2>/dev/null | jq -r '.environment.name // "production"' 2>/dev/null || echo "production")
-    
-    # Set URLs
-    export REFLEX_API_URL="http://${BACKEND_NAME}.railway.internal:8080"
-        # temporary FRONTEND_DEPLOY_URL (likely to change after deployment)
-    export FRONTEND_DEPLOY_URL="https://${FRONTEND_NAME}-${RAILWAY_ENVIRONMENT}.up.railway.app"
     
     # Get database URL if PostgreSQL enabled
     if [ "$ENABLE_POSTGRES" = true ]; then
         DATABASE_URL=$(railway variables --service "Postgres" --json 2>/dev/null | jq -r '.DATABASE_URL // empty' 2>/dev/null || echo "")
         if [ -n "$DATABASE_URL" ]; then
-            export DATABASE_URL REFLEX_DB_URL="$DATABASE_URL"
+            export REFLEX_DB_URL="$DATABASE_URL"
             update_env "REFLEX_DB_URL" "$REFLEX_DB_URL" "$ENV_FILE"
         fi
     fi
@@ -139,18 +133,45 @@ deploy_service() {
     success "$service_type deployed"
 }
 
-# Update frontend URL after deployment
-update_frontend_url() {
-    sleep 5
-    REFLEX_PUBLIC_DOMAIN=$(railway variables --service "$FRONTEND_NAME" --json 2>/dev/null | jq -r '.REFLEX_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
+# Update deployment URLs after services are deployed
+update_deployment_urls() {
+    log "Getting deployment URLs..."
     
-    if [ -n "$REFLEX_PUBLIC_DOMAIN" ]; then
-        export FRONTEND_DEPLOY_URL="https://$REFLEX_PUBLIC_DOMAIN"
-        update_env "FRONTEND_DEPLOY_URL" "$FRONTEND_DEPLOY_URL" "$ENV_FILE"
-        "$DEPLOY_DIR/set_railway_vars.sh" -s "$BACKEND_NAME" -f "$ENV_FILE" 2>/dev/null || warn "Failed to update backend with new frontend URL"
-        "$DEPLOY_DIR/set_railway_vars.sh" -s "$FRONTEND_NAME" -f "$ENV_FILE" 2>/dev/null || warn "Failed to update backend with new frontend URL"
-        success "Frontend URL updated: $FRONTEND_DEPLOY_URL"
+    # Get backend domain
+    BACKEND_DOMAIN=$(railway domain --service "$BACKEND_NAME" --json 2>/dev/null | jq -r '.domain // empty' 2>/dev/null || echo "")
+    if [ -z "$BACKEND_DOMAIN" ]; then
+        log "Generating domain for backend service..."
+        railway domain --service "$BACKEND_NAME" >/dev/null 2>&1 || warn "Failed to generate backend domain"
+        sleep 3
+        BACKEND_DOMAIN=$(railway domain --service "$BACKEND_NAME" --json 2>/dev/null | jq -r '.domain // empty' 2>/dev/null || echo "")
     fi
+    
+    # Get frontend domain  
+    FRONTEND_DOMAIN=$(railway domain --service "$FRONTEND_NAME" --json 2>/dev/null | jq -r '.domain // empty' 2>/dev/null || echo "")
+    if [ -z "$FRONTEND_DOMAIN" ]; then
+        log "Generating domain for frontend service..."
+        railway domain --service "$FRONTEND_NAME" >/dev/null 2>&1 || warn "Failed to generate frontend domain"
+        sleep 3
+        FRONTEND_DOMAIN=$(railway domain --service "$FRONTEND_NAME" --json 2>/dev/null | jq -r '.domain // empty' 2>/dev/null || echo "")
+    fi
+    
+    # Update environment variables
+    if [ -n "$BACKEND_DOMAIN" ]; then
+        REFLEX_API_URL="https://$BACKEND_DOMAIN"
+        update_env "REFLEX_API_URL" "$REFLEX_API_URL" "$ENV_FILE"
+        # Set for frontend service
+        railway variables --service "$FRONTEND_NAME" --set "REFLEX_API_URL=$REFLEX_API_URL" >/dev/null 2>&1 || warn "Failed to set REFLEX_API_URL on frontend"
+    fi
+    
+    if [ -n "$FRONTEND_DOMAIN" ]; then
+        FRONTEND_DEPLOY_URL="https://$FRONTEND_DOMAIN"
+        update_env "FRONTEND_DEPLOY_URL" "$FRONTEND_DEPLOY_URL" "$ENV_FILE"
+        # Set for both services
+        railway variables --service "$BACKEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" >/dev/null 2>&1 || warn "Failed to set FRONTEND_DEPLOY_URL on backend"
+        railway variables --service "$FRONTEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" >/dev/null 2>&1 || warn "Failed to set FRONTEND_DEPLOY_URL on frontend"
+    fi
+    
+    success "Deployment URLs configured"
 }
 
 # Deploy all services
@@ -158,7 +179,7 @@ deploy_all() {
     log "Deploying services..."
     deploy_service "$BACKEND_NAME" "backend"
     deploy_service "$FRONTEND_NAME" "frontend"
-    update_frontend_url
+    update_deployment_urls
     success "All services deployed"
 }
 
@@ -216,7 +237,7 @@ deploy_all
 
 # Summary
 header "Deployment Complete"
-echo "✓ Frontend: https://$FRONTEND_NAME.up.railway.app"
-echo "✓ Backend: https://$BACKEND_NAME.up.railway.app"
+echo "✓ Frontend: https://$FRONTEND_DOMAIN"
+echo "✓ Backend: https://$BACKEND_DOMAIN" 
 [ "$ENABLE_POSTGRES" = true ] && echo "✓ PostgreSQL: Database running"
 echo "Commands: railway status | railway logs --service <name> | railway variables --service <name>"
