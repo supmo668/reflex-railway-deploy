@@ -405,6 +405,122 @@ Once deployed, you can access your application at:
 https://<frontend-name>.up.railway.app
 ```
 
+## Unified Deployment Script
+
+This directory contains a single, intelligent deployment script that handles both initial setup and subsequent deployments.
+
+### `deploy_all.sh` - Unified Railway Deployment Script
+
+This comprehensive script automatically detects your Railway project state and performs only the necessary operations.
+
+**Smart Features:**
+- **Service Detection**: Automatically checks if PostgreSQL, frontend, and backend services exist
+- **Initial Setup**: For new projects, creates all services, configures variables, runs migrations
+- **Quick Deploy**: For existing projects, skips setup and deploys directly with fresh configs
+- **Force Initialization**: Use `--force-init` to recreate services if needed
+- **Always Fresh**: Copies latest Caddyfile and nixpacks.toml before every deployment
+
+**Usage:**
+```bash
+./reflex-railway-deploy/deploy_all.sh -p PROJECT [OPTIONS]
+
+Required:
+  -p, --project PROJECT      Railway project ID or name (required)
+
+Options:
+  -t, --team TEAM           Railway team (default: personal)
+  -e, --environment ENV     Railway environment (default: production)
+  -f, --file FILE           Environment file to use (default: .env)
+  -d, --deploy-dir DIR      Deploy directory (default: reflex-railway-deploy)
+      --no-postgres         Skip PostgreSQL deployment
+      --postgres            Enable PostgreSQL deployment (default)
+      --force-init          Force re-initialization even if services exist
+  -h, --help                Show help message
+```
+
+**Note**: Run this script from your main application directory (not from inside reflex-railway-deploy). The script will automatically detect your app name from the directory name.
+
+**Automatic Behavior:**
+- **First Time**: Creates PostgreSQL → Creates services → Sets variables → Runs migrations → Deploys
+- **Subsequent Runs**: Skips creation steps → Copies configs → Deploys services
+- **Mixed State**: Only creates missing services, skips existing ones
+
+**When the script detects existing services, it will:**
+1. Skip PostgreSQL creation (if already exists)
+2. Skip service creation (if already exists) 
+3. Skip variable setup and migrations
+4. Copy fresh Caddyfile.{service} and nixpacks.{service}.toml
+5. Deploy both frontend and backend services
+6. Display service URLs
+
+**Railway CLI Usage Pattern:**
+The script uses Railway CLI commands in this pattern:
+1. **Initial Link**: `railway link -p PROJECT -e ENVIRONMENT -t TEAM -s postgres` (establishes connection)
+2. **Service Check**: `railway link -p PROJECT -e ENVIRONMENT -t TEAM -s SERVICE_NAME` (checks if service exists)
+3. **Service Selection**: `railway service SERVICE_NAME` (selects service for deployment)
+4. **Deployment**: `railway up` (deploys the selected service)
+
+This ensures all Railway operations use the correct service context.
+
+**Getting your Railway Project Information:**
+```bash
+# Login to Railway and list your projects
+railway login
+railway projects
+
+# List teams (if you're part of any)
+railway teams
+
+# Or get project name from the Railway dashboard URL
+# https://railway.app/project/YOUR_PROJECT_ID -> use the project name shown in UI
+```
+
+## Script Configuration
+
+The deployment script accepts configuration through command line arguments and optional environment variables:
+
+### Required Arguments:
+- `RAILWAY_PROJECT_ID` - Must be provided via `-p` argument
+
+### Optional Environment Variables (.env file):
+- `FRONTEND_NAME` - Name of the frontend service (default: frontend)
+- `BACKEND_NAME` - Name of the backend service (default: backend)  
+- `RAILWAY_ENVIRONMENT_NAME` - Railway environment (default: production)
+
+**Note**: The app name is automatically detected from your current directory name.
+
+## Deployment Examples
+
+### Initial deployment with project:
+```bash
+./reflex-railway-deploy/deploy_all.sh -p my-project --postgres
+```
+
+### Deploy to team project:
+```bash
+./reflex-railway-deploy/deploy_all.sh -t my-team -p my-project
+```
+
+### Deploy to specific environment:
+```bash
+./reflex-railway-deploy/deploy_all.sh -p my-project -e staging
+```
+
+### Complete example with all options:
+```bash
+./reflex-railway-deploy/deploy_all.sh -t my-team -p my-project -e production --postgres
+```
+
+### Quick redeploy after code changes:
+```bash
+./reflex-railway-deploy/deploy_all.sh -p my-project
+```
+
+### Force re-initialization of all services:
+```bash
+./reflex-railway-deploy/deploy_all.sh -p my-project --force-init
+```
+
 ## Troubleshooting
 
 ### Common Issues

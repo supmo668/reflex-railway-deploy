@@ -1,10 +1,27 @@
 #!/bin/bash
-# deploy_all.sh - Deploy Reflex application to Railway
+# deploy_all.sh - Unified Railway deployment script for Reflex applications
 # 
 # This script intelligently handles both initial deployments and subsequent redeployments:
-# - For new services: Creates services, sets up PostgreSQL, configures variables, runs migrations
-# - For existing services: Skips initialization steps and directly deploys with updated configs
+# - For new projects: Creates PostgreSQL, frontend, and backend services, configures variables, runs migrations
+# - For existing projects: Skips service creation and setup, only copies configs and # Show config and deploy
+header "Railway Deployment for $APP_NAME"
+echo "Project: $RAILWAY_PROJECT"
+echo "Team: $RAILWAY_TEAM"
+echo "Environment: $RAILWAY_ENVIRONMENT"
+echo "Frontend: $FRONTEND_NAME | Backend: $BACKEND_NAME"
+if [ "$ENABLE_POSTGRES" = true ]; then
+    POSTGRES_STATUS="Enabled"
+else
+    POSTGRES_STATUS="Disabled"
+fi
+if [ "$FORCE_INIT" = true ]; then
+    FORCE_STATUS="Yes"
+else
+    FORCE_STATUS="No"
+fi
+echo "PostgreSQL: $POSTGRES_STATUS | Force Init: $FORCE_STATUS"ys
 # - Always copies fresh Caddyfile and nixpacks.toml files before deployment
+# - Automatically detects which services exist to minimize unnecessary operations
 
 set -e
 
@@ -42,10 +59,13 @@ init_project() {
 
 # Deploy PostgreSQL
 deploy_postgres() {
-    [ "$ENABLE_POSTGRES" = false ] && { log "PostgreSQL skipped"; return 0; }
+    if [ "$ENABLE_POSTGRES" = false ]; then
+        log "PostgreSQL deployment disabled"
+        return 0
+    fi
     
-    if railway service list 2>/dev/null | grep -q "Postgres"; then
-        success "PostgreSQL already exists"
+    if [ "$POSTGRES_NEED_INIT" = false ]; then
+        success "PostgreSQL already exists, skipping"
         return 0
     fi
     
@@ -69,6 +89,11 @@ update_env() {
 
 # Setup Railway variables and database
 setup_vars() {
+    if [ "$SERVICES_NEED_INIT" = false ]; then
+        log "Services already exist, skipping variable setup"
+        return 0
+    fi
+    
     # Service configuration
     BACKEND_NAME=${BACKEND_NAME:-"backend"}
     FRONTEND_NAME=${FRONTEND_NAME:-"frontend"}
@@ -91,13 +116,34 @@ setup_vars() {
 
 # Run database migrations
 run_migrations() {
-    [ "$ENABLE_POSTGRES" = false ] || [ -z "$DATABASE_URL" ] && return 0
+    if [ "$ENABLE_POSTGRES" = false ]; then
+        log "PostgreSQL disabled, skipping migrations"
+        return 0
+    fi
+    
+    if [ "$POSTGRES_NEED_INIT" = false ]; then
+        log "PostgreSQL already exists, skipping migrations"
+        return 0
+    fi
+    
+    if [ -z "$DATABASE_URL" ]; then
+        warn "No DATABASE_URL found, skipping migrations"
+        return 0
+    fi
     
     log "Running database setup..."
     export DATABASE_URL
     REFLEX_DB_URL=$DATABASE_URL reflex db init 2>/dev/null || true
     REFLEX_DB_URL=$DATABASE_URL reflex db migrate 2>/dev/null || true
     success "Database ready"
+}
+
+# Check if service exists in Railway project
+service_exists() {
+    local service_name=$1
+    # Use railway link with all parameters to check if service exists
+    # If service exists, linking succeeds; if not, it fails
+    railway link -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" -t "$RAILWAY_TEAM" -s "$service_name" &>/dev/null
 }
 
 # Check if service is already initialized (has deployments)
@@ -109,44 +155,80 @@ is_service_initialized() {
 
 # Check initialization status of all services
 check_services_status() {
+    FRONTEND_EXISTS=false
+    BACKEND_EXISTS=false
+    POSTGRES_EXISTS=false
     FRONTEND_INITIALIZED=false
     BACKEND_INITIALIZED=false
     
     if [ "$FORCE_INIT" = true ]; then
         log "Force initialization flag set, treating all services as uninitialized"
         SERVICES_NEED_INIT=true
+        POSTGRES_NEED_INIT=true
         return 0
     fi
     
-    if railway service list 2>/dev/null | grep -q "$FRONTEND_NAME"; then
+    # Check if PostgreSQL service exists
+    if service_exists "Postgres"; then
+        POSTGRES_EXISTS=true
+        success "PostgreSQL service already exists"
+    else
+        log "PostgreSQL service does not exist"
+    fi
+    
+    # Check frontend service
+    if service_exists "$FRONTEND_NAME"; then
+        FRONTEND_EXISTS=true
         if is_service_initialized "$FRONTEND_NAME"; then
             FRONTEND_INITIALIZED=true
             success "Frontend service already initialized"
         else
             log "Frontend service exists but not deployed yet"
         fi
+    else
+        log "Frontend service does not exist"
     fi
     
-    if railway service list 2>/dev/null | grep -q "$BACKEND_NAME"; then
+    # Check backend service
+    if service_exists "$BACKEND_NAME"; then
+        BACKEND_EXISTS=true
         if is_service_initialized "$BACKEND_NAME"; then
             BACKEND_INITIALIZED=true
             success "Backend service already initialized"
         else
             log "Backend service exists but not deployed yet"
         fi
+    else
+        log "Backend service does not exist"
     fi
     
-    # Set global flag for whether any services need initialization
+    # Set global flags for what needs initialization
     SERVICES_NEED_INIT=false
-    if [ "$FRONTEND_INITIALIZED" = false ] || [ "$BACKEND_INITIALIZED" = false ]; then
+    POSTGRES_NEED_INIT=false
+    
+    if [ "$FRONTEND_EXISTS" = false ] || [ "$BACKEND_EXISTS" = false ]; then
         SERVICES_NEED_INIT=true
+    fi
+    
+    if [ "$POSTGRES_EXISTS" = false ] && [ "$ENABLE_POSTGRES" = true ]; then
+        POSTGRES_NEED_INIT=true
+    fi
+    
+    # Summary of what will be done
+    if [ "$SERVICES_NEED_INIT" = false ] && [ "$POSTGRES_NEED_INIT" = false ]; then
+        success "All services exist. Will perform quick deployment only."
+    else
+        log "Some services need initialization:"
+        [ "$POSTGRES_NEED_INIT" = true ] && log "  - PostgreSQL will be created"
+        [ "$FRONTEND_EXISTS" = false ] && log "  - Frontend service will be created"
+        [ "$BACKEND_EXISTS" = false ] && log "  - Backend service will be created"
     fi
 }
 
 # Create and configure services (only if needed)
 setup_services() {
     if [ "$SERVICES_NEED_INIT" = false ]; then
-        success "All services already initialized, skipping setup"
+        success "All services already exist, skipping service creation and variable setup"
         return 0
     fi
     
@@ -154,17 +236,25 @@ setup_services() {
     
     # Create services if they don't exist
     for service in "$FRONTEND_NAME" "$BACKEND_NAME"; do
-        if ! railway service list 2>/dev/null | grep -q "$service"; then
+        if ! service_exists "$service"; then
+            log "Creating service: $service"
             railway add --service "$service" || error "Failed to create $service service"
+        else
+            log "Service already exists: $service"
         fi
     done
     
-    # Sync variables to Railway services
-    chmod +x "$DEPLOY_DIR/set_railway_vars.sh" 2>/dev/null || error "set_railway_vars.sh not found in $DEPLOY_DIR"
-    
-    for service in "$BACKEND_NAME" "$FRONTEND_NAME"; do
-        "$DEPLOY_DIR/set_railway_vars.sh" -s "$service" -f "$ENV_FILE" || error "Failed to sync variables to $service"
-    done
+    # Sync variables to Railway services only if set_railway_vars.sh exists
+    if [ -f "$DEPLOY_DIR/set_railway_vars.sh" ]; then
+        chmod +x "$DEPLOY_DIR/set_railway_vars.sh"
+        
+        for service in "$BACKEND_NAME" "$FRONTEND_NAME"; do
+            log "Syncing variables to $service"
+            "$DEPLOY_DIR/set_railway_vars.sh" -s "$service" -f "$ENV_FILE" || warn "Failed to sync variables to $service"
+        done
+    else
+        warn "set_railway_vars.sh not found, skipping variable sync"
+    fi
     
     success "Services configured"
 }
@@ -173,19 +263,11 @@ setup_services() {
 setup_railway_project() {
     header "Linking Railway Project and Setting Environment"
 
-    if [ -z "$RAILWAY_PROJECT_ID" ]; then
-        error "RAILWAY_PROJECT_ID is not set. Please define it in your $ENV_FILE."
-    fi
+    # First, link to postgres service to establish the initial connection
+    log "Linking to Railway project with postgres service..."
+    railway link -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" -t "$RAILWAY_TEAM" -s postgres || error "Failed to link Railway project. Make sure you are logged in (railway login) and the project/team exists."
 
-    local env_name="${RAILWAY_ENVIRONMENT_NAME:-production}"
-
-    log "Linking to Railway project $RAILWAY_PROJECT_ID..."
-    railway link "$RAILWAY_PROJECT_ID" || error "Failed to link Railway project. Make sure you are logged in (railway login) and the project ID is correct."
-
-    log "Setting Railway environment to $env_name..."
-    railway environment "$env_name" || error "Failed to set Railway environment. Make sure the environment exists or can be created."
-
-    success "Railway project linked and environment set to $env_name."
+    success "Railway project linked successfully."
 }
 
 # Deploy service
@@ -198,8 +280,8 @@ deploy_service() {
     cp "$DEPLOY_DIR/Caddyfile.$service_type" Caddyfile || error "Caddyfile.$service_type not found"
     cp "$DEPLOY_DIR/nixpacks.$service_type.toml" nixpacks.toml || error "nixpacks.$service_type.toml not found"
     
-    # Deploy
-    railway service "$service_name" || error "Failed to select $service_name"
+    # Set the service and deploy
+    railway service "$service_name" || error "Failed to set service to $service_name"
     railway up || error "Failed to deploy $service_name"
     
     success "$service_type deployed"
@@ -227,7 +309,7 @@ update_deployment_urls() {
         FRONTEND_DOMAIN=$(railway domain --service "$FRONTEND_NAME" --json 2>/dev/null | jq -r '.domain // empty' 2>/dev/null || echo "")
     fi
     
-    # Update environment variables only if services were newly initialized
+    # Update environment variables only if services were newly created
     if [ "$SERVICES_NEED_INIT" = true ]; then
         if [ -n "$BACKEND_DOMAIN" ]; then
             REFLEX_API_URL="https://$BACKEND_DOMAIN"
@@ -244,7 +326,7 @@ update_deployment_urls() {
             railway variables --service "$FRONTEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" >/dev/null 2>&1 || warn "Failed to set FRONTEND_DEPLOY_URL on frontend"
         fi
     else
-        log "Services already initialized, skipping environment variable updates"
+        log "Services already exist, skipping environment variable updates"
         # Just get URLs for display purposes
         if [ -n "$BACKEND_DOMAIN" ]; then
             REFLEX_API_URL="https://$BACKEND_DOMAIN"
@@ -252,11 +334,6 @@ update_deployment_urls() {
         if [ -n "$FRONTEND_DOMAIN" ]; then
             FRONTEND_DEPLOY_URL="https://$FRONTEND_DOMAIN"
         fi
-    fi
-    
-    success "Deployment URLs configured"
-}
-        railway variables --service "$FRONTEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" >/dev/null 2>&1 || warn "Failed to set FRONTEND_DEPLOY_URL on frontend"
     fi
     
     success "Deployment URLs configured"
@@ -278,13 +355,19 @@ ENV_FILE=".env" DEPLOY_DIR="reflex-railway-deploy" ENABLE_POSTGRES=true FORCE_IN
 while [[ $# -gt 0 ]]; do
     case $1 in
         -h|--help) 
-            echo "Usage: $0 [-f file] [-d dir] [--no-postgres] [--force-init]"
-            echo "  -f, --file FILE        Environment file to use (default: .env)"
-            echo "  -d, --deploy-dir DIR   Deploy directory (default: reflex-railway-deploy)"
-            echo "  --no-postgres          Skip PostgreSQL deployment"
-            echo "  --postgres             Enable PostgreSQL deployment (default)"
-            echo "  --force-init           Force re-initialization even if services exist"
+            echo "Usage: $0 -p PROJECT [OPTIONS]"
+            echo "  -p, --project PROJECT      Railway project ID or name (required)"
+            echo "  -t, --team TEAM           Railway team (default: Personal)"
+            echo "  -e, --environment ENV     Railway environment (default: production)"
+            echo "  -f, --file FILE           Environment file to use (default: .env)"
+            echo "  -d, --deploy-dir DIR      Deploy directory (default: reflex-railway-deploy)"
+            echo "      --no-postgres         Skip PostgreSQL deployment"
+            echo "      --postgres            Enable PostgreSQL deployment (default)"
+            echo "      --force-init          Force re-initialization even if services exist"
             exit 0 ;;
+        -p|--project) RAILWAY_PROJECT="$2"; shift 2 ;;
+        -t|--team) RAILWAY_TEAM="$2"; shift 2 ;;
+        -e|--environment) RAILWAY_ENVIRONMENT="$2"; shift 2 ;;
         -f|--file) ENV_FILE="$2"; shift 2 ;;
         -d|--deploy-dir) DEPLOY_DIR="$2"; shift 2 ;;
         --no-postgres) ENABLE_POSTGRES=false; shift ;;
@@ -294,6 +377,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Validate required arguments
+[ -z "$RAILWAY_PROJECT" ] && error "Railway project is required. Use -p PROJECT"
+
 # Validate and load environment
 [ -f "$ENV_FILE" ] || error "Environment file $ENV_FILE not found"
 [ -d "$DEPLOY_DIR" ] || error "Deploy directory $DEPLOY_DIR not found"
@@ -302,14 +388,17 @@ if [ -s "$ENV_FILE" ]; then
     set -a; source "$ENV_FILE" || error "Failed to source $ENV_FILE"; set +a
 fi
 
-# Set defaults
-REFLEX_APP_NAME=${REFLEX_APP_NAME:-"reflex_railway_deployment"}
+# Set defaults (after loading .env)
+APP_NAME=${REFLEX_APP_NAME:-$(basename "$PWD")}
 FRONTEND_NAME=${FRONTEND_NAME:-"frontend"}
 BACKEND_NAME=${BACKEND_NAME:-"backend"}
+RAILWAY_ENVIRONMENT=${RAILWAY_ENVIRONMENT:-"production"}
+RAILWAY_TEAM=${RAILWAY_TEAM:-"personal"}
 
 # Show config and deploy
-header "Reflex Railway Deployment"
-echo "App: $REFLEX_APP_NAME | Frontend: $FRONTEND_NAME | Backend: $BACKEND_NAME"
+header "Railway Deployment for $APP_NAME"
+echo "Project ID: $RAILWAY_PROJECT_ID"
+echo "Frontend: $FRONTEND_NAME | Backend: $BACKEND_NAME"
 echo "PostgreSQL: $([ "$ENABLE_POSTGRES" = true ] && echo "Enabled" || echo "Disabled") | Force Init: $([ "$FORCE_INIT" = true ] && echo "Yes" || echo "No")"
 
 # Main deployment flow
@@ -323,8 +412,8 @@ init_project
 pause_for_verification "Railway project initialization complete. Ready to check service status."
 
 check_services_status
-if [ "$SERVICES_NEED_INIT" = true ]; then
-    pause_for_verification "Service status checked. Some services need initialization. Ready to deploy PostgreSQL (if enabled)."
+if [ "$SERVICES_NEED_INIT" = true ] || [ "$POSTGRES_NEED_INIT" = true ]; then
+    pause_for_verification "Service status checked. Some services need initialization. Ready to deploy PostgreSQL (if needed)."
     
     deploy_postgres
     pause_for_verification "PostgreSQL deployment complete. Ready to setup environment variables."
@@ -338,8 +427,8 @@ if [ "$SERVICES_NEED_INIT" = true ]; then
     setup_services
     pause_for_verification "Railway services setup complete. Ready to deploy all services."
 else
-    log "All services already initialized. Skipping PostgreSQL, variables, migrations, and service setup."
-    pause_for_verification "Service status checked. All services already initialized. Ready to deploy services."
+    log "All services already exist. Skipping PostgreSQL, variables, migrations, and service setup."
+    pause_for_verification "Service status checked. All services already exist. Ready to deploy services."
 fi
 
 deploy_all
