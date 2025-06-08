@@ -422,12 +422,16 @@ This comprehensive script automatically detects your Railway project state and p
 
 **Usage:**
 ```bash
-./reflex-railway-deploy/deploy_all.sh -p PROJECT [OPTIONS]
+./reflex-railway-deploy/deploy_all.sh -p PROJECT [BACKEND_NAME] [FRONTEND_NAME] [OPTIONS]
 
-Required:
+Positional Arguments:
+  BACKEND_NAME              Name of backend service (default: backend)
+  FRONTEND_NAME             Name of frontend service (default: frontend)
+
+Required Options:
   -p, --project PROJECT      Railway project ID or name (required)
 
-Options:
+Optional Options:
   -t, --team TEAM           Railway team (default: personal)
   -e, --environment ENV     Railway environment (default: production)
   -f, --file FILE           Environment file to use (default: .env)

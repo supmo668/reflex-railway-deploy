@@ -355,15 +355,28 @@ ENV_FILE=".env" DEPLOY_DIR="reflex-railway-deploy" ENABLE_POSTGRES=true FORCE_IN
 while [[ $# -gt 0 ]]; do
     case $1 in
         -h|--help) 
-            echo "Usage: $0 -p PROJECT [OPTIONS]"
+            echo "Usage: $0 -p PROJECT [BACKEND_NAME] [FRONTEND_NAME] [OPTIONS]"
+            echo ""
+            echo "Positional Arguments:"
+            echo "  BACKEND_NAME              Name of backend service (default: backend)"
+            echo "  FRONTEND_NAME             Name of frontend service (default: frontend)"
+            echo ""
+            echo "Required Options:"
             echo "  -p, --project PROJECT      Railway project ID or name (required)"
-            echo "  -t, --team TEAM           Railway team (default: Personal)"
+            echo ""
+            echo "Optional Options:"
+            echo "  -t, --team TEAM           Railway team (default: personal)"
             echo "  -e, --environment ENV     Railway environment (default: production)"
             echo "  -f, --file FILE           Environment file to use (default: .env)"
             echo "  -d, --deploy-dir DIR      Deploy directory (default: reflex-railway-deploy)"
             echo "      --no-postgres         Skip PostgreSQL deployment"
             echo "      --postgres            Enable PostgreSQL deployment (default)"
             echo "      --force-init          Force re-initialization even if services exist"
+            echo ""
+            echo "Examples:"
+            echo "  $0 -p my-project                              # Use default service names"
+            echo "  $0 -p my-project api web                      # Custom service names"
+            echo "  $0 -p my-project backend frontend -t my-team  # With team"
             exit 0 ;;
         -p|--project) RAILWAY_PROJECT="$2"; shift 2 ;;
         -t|--team) RAILWAY_TEAM="$2"; shift 2 ;;
@@ -373,7 +386,17 @@ while [[ $# -gt 0 ]]; do
         --no-postgres) ENABLE_POSTGRES=false; shift ;;
         --postgres) ENABLE_POSTGRES=true; shift ;;
         --force-init) FORCE_INIT=true; shift ;;
-        *) error "Unknown option: $1" ;;
+        -*) error "Unknown option: $1" ;;
+        *) 
+            # Handle positional arguments
+            if [ -z "$BACKEND_NAME_ARG" ]; then
+                BACKEND_NAME_ARG="$1"
+            elif [ -z "$FRONTEND_NAME_ARG" ]; then
+                FRONTEND_NAME_ARG="$1"
+            else
+                error "Too many positional arguments: $1"
+            fi
+            shift ;;
     esac
 done
 
@@ -390,8 +413,8 @@ fi
 
 # Set defaults (after loading .env)
 APP_NAME=${REFLEX_APP_NAME:-$(basename "$PWD")}
-FRONTEND_NAME=${FRONTEND_NAME:-"frontend"}
-BACKEND_NAME=${BACKEND_NAME:-"backend"}
+BACKEND_NAME=${BACKEND_NAME_ARG:-${BACKEND_NAME:-"backend"}}
+FRONTEND_NAME=${FRONTEND_NAME_ARG:-${FRONTEND_NAME:-"frontend"}}
 RAILWAY_ENVIRONMENT=${RAILWAY_ENVIRONMENT:-"production"}
 RAILWAY_TEAM=${RAILWAY_TEAM:-"personal"}
 
