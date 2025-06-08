@@ -1,0 +1,316 @@
+[
+  {
+    "id": "56921656-a768-4f2a-9190-5526a60d6574",
+    "name": "spyglass",
+    "createdAt": "2025-03-08T21:41:29.683Z",
+    "updatedAt": "2025-06-05T20:16:53.727Z",
+    "team": {
+      "id": "714aad0b-05f9-4bcc-930a-1726b42a078c",
+      "name": "prototype"
+    },
+    "environments": {
+      "edges": [
+        {
+          "node": {
+            "id": "1de505f5-a9be-47b9-888a-09986fc6b584",
+            "name": "dev"
+          }
+        },
+        {
+          "node": {
+            "id": "5d39ba48-e102-4348-970e-3fcffd9ba259",
+            "name": "production"
+          }
+        }
+      ]
+    },
+    "services": {
+      "edges": [
+        {
+          "node": {
+            "id": "68cae643-44a2-4e23-9c75-7bb96963ab5a",
+            "name": "spyglass-portal",
+            "serviceInstances": {
+              "edges": [
+                {
+                  "node": {
+                    "environmentId": "1de505f5-a9be-47b9-888a-09986fc6b584"
+                  }
+                },
+                {
+                  "node": {
+                    "environmentId": "5d39ba48-e102-4348-970e-3fcffd9ba259"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "node": {
+            "id": "aa14aa0f-fb3f-42c9-915f-4065e84db81b",
+            "name": "spyglass-api",
+            "serviceInstances": {
+              "edges": [
+                {
+                  "node": {
+                    "environmentId": "5d39ba48-e102-4348-970e-3fcffd9ba259"
+                  }
+                },
+                {
+                  "node": {
+                    "environmentId": "1de505f5-a9be-47b9-888a-09986fc6b584"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "18c205dd-a58d-44b0-928b-54eafac27695",
+    "name": "SciLab_Video",
+    "createdAt": "2025-01-04T06:33:23.819Z",
+    "updatedAt": "2025-03-14T02:52:00.571Z",
+    "team": {
+      "id": "714aad0b-05f9-4bcc-930a-1726b42a078c",
+      "name": "prototype"
+    },
+    "environments": {
+      "edges": [
+        {
+          "node": {
+            "id": "c741dbbd-8531-4539-8f1e-1a907d851519",
+            "name": "annotation"
+          }
+        }
+      ]
+    },
+    "services": {
+      "edges": [
+        {
+          "node": {
+            "id": "1249e09c-836c-4d58-8d62-22408b17d6fb",
+            "name": "backend",
+            "serviceInstances": {
+              "edges": [
+                {
+                  "node": {
+                    "environmentId": "c741dbbd-8531-4539-8f1e-1a907d851519"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "node": {
+            "id": "a469e9dc-7a6f-474d-acf9-25f6cda3b12c",
+            "name": "frontend",
+            "serviceInstances": {
+              "edges": [
+                {
+                  "node": {
+                    "environmentId": "c741dbbd-8531-4539-8f1e-1a907d851519"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "18c205dd-a58d-44b0-928b-54eafac27695",
+    "name": "SciLab_Video",
+    "updatedAt": "2025-03-14T02:52:00.571Z",
+    "team": {
+      "id": "714aad0b-05f9-4bcc-930a-1726b42a078c",
+      "name": "prototype"
+    },
+    "environments": {
+      "edges": [
+        {
+          "node": {
+            "id": "c741dbbd-8531-4539-8f1e-1a907d851519",
+            "name": "annotation"
+          }
+        }
+      ]
+    },
+    "services": {
+      "edges": [
+        {
+          "node": {
+            "id": "1249e09c-836c-4d58-8d62-22408b17d6fb",
+            "name": "backend",
+            "serviceInstances": {
+              "edges": [
+                {
+                  "node": {
+                    "environmentId": "c741dbbd-8531-4539-8f1e-1a907d851519"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "node": {
+            "id": "a469e9dc-7a6f-474d-acf9-25f6cda3b12c",
+            "name": "frontend",
+            "serviceInstances": {
+              "edges": [
+                {
+                  "node": {
+                    "environmentId": "c741dbbd-8531-4539-8f1e-1a907d851519"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "56921656-a768-4f2a-9190-5526a60d6574",
+    "name": "spyglass",
+    "updatedAt": "2025-06-05T20:16:53.727Z",
+    "team": {
+      "id": "714aad0b-05f9-4bcc-930a-1726b42a078c",
+      "name": "prototype"
+    },
+    "environments": {
+      "edges": [
+        {
+          "node": {
+            "id": "1de505f5-a9be-47b9-888a-09986fc6b584",
+            "name": "dev"
+          }
+        },
+        {
+          "node": {
+            "id": "5d39ba48-e102-4348-970e-3fcffd9ba259",
+            "name": "production"
+          }
+        }
+      ]
+    },
+    "services": {
+      "edges": [
+        {
+          "node": {
+            "id": "68cae643-44a2-4e23-9c75-7bb96963ab5a",
+            "name": "spyglass-portal",
+            "serviceInstances": {
+              "edges": [
+                {
+                  "node": {
+                    "environmentId": "1de505f5-a9be-47b9-888a-09986fc6b584"
+                  }
+                },
+                {
+                  "node": {
+                    "environmentId": "5d39ba48-e102-4348-970e-3fcffd9ba259"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "node": {
+            "id": "aa14aa0f-fb3f-42c9-915f-4065e84db81b",
+            "name": "spyglass-api",
+            "serviceInstances": {
+              "edges": [
+                {
+                  "node": {
+                    "environmentId": "5d39ba48-e102-4348-970e-3fcffd9ba259"
+                  }
+                },
+                {
+                  "node": {
+                    "environmentId": "1de505f5-a9be-47b9-888a-09986fc6b584"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "ec7711c5-b641-4f7a-8acc-db524713534a",
+    "name": "reflex-template",
+    "updatedAt": "2025-06-08T02:07:05.460Z",
+    "team": {
+      "id": "714aad0b-05f9-4bcc-930a-1726b42a078c",
+      "name": "prototype"
+    },
+    "environments": {
+      "edges": [
+        {
+          "node": {
+            "id": "06363e59-3d87-487d-9d90-8241ef8d7dd8",
+            "name": "production"
+          }
+        }
+      ]
+    },
+    "services": {
+      "edges": [
+        {
+          "node": {
+            "id": "7138e416-0641-4064-bdf1-93c1ad929f80",
+            "name": "backend",
+            "serviceInstances": {
+              "edges": [
+                {
+                  "node": {
+                    "environmentId": "06363e59-3d87-487d-9d90-8241ef8d7dd8"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "node": {
+            "id": "c0b755f7-9ebc-4e16-8cd6-05f8e0c76d90",
+            "name": "frontend",
+            "serviceInstances": {
+              "edges": [
+                {
+                  "node": {
+                    "environmentId": "06363e59-3d87-487d-9d90-8241ef8d7dd8"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "node": {
+            "id": "cd4c1e66-1ef9-43da-946f-e1ef5a0890a8",
+            "name": "Postgres",
+            "serviceInstances": {
+              "edges": [
+                {
+                  "node": {
+                    "environmentId": "06363e59-3d87-487d-9d90-8241ef8d7dd8"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+]

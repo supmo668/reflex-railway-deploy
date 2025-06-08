@@ -147,8 +147,13 @@ service_exists() {
         return 1  # Failed to get service list
     fi
     
-    # Check if the service name exists in the JSON output
-    echo "$services_json" | jq -e --arg service "$service_name" '.[] | select(.name == $service)' >/dev/null 2>&1
+    # Parse the nested JSON structure to find services
+    # Structure: [{"name": "project", "services": {"edges": [{"node": {"name": "service"}}]}}]
+    echo "$services_json" | jq -e --arg service "$service_name" '
+        .[] | 
+        .services.edges[]?.node | 
+        select(.name == $service)
+    ' >/dev/null 2>&1
 }
 
 # Check if service is already initialized (has deployments)
