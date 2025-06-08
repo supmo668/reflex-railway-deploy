@@ -141,9 +141,14 @@ run_migrations() {
 # Check if service exists in Railway project
 service_exists() {
     local service_name=$1
-    # Use railway link with all parameters to check if service exists
-    # If service exists, linking succeeds; if not, it fails
-    railway link -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" -t "$RAILWAY_TEAM" -s "$service_name" &>/dev/null
+    # Use railway list --json to get all services and check if the service exists
+    local services_json=$(railway list --json 2>/dev/null)
+    if [ -z "$services_json" ]; then
+        return 1  # Failed to get service list
+    fi
+    
+    # Check if the service name exists in the JSON output
+    echo "$services_json" | jq -e --arg service "$service_name" '.[] | select(.name == $service)' >/dev/null 2>&1
 }
 
 # Check if service is already initialized (has deployments)

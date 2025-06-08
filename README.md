@@ -459,12 +459,12 @@ Optional Options:
 
 **Railway CLI Usage Pattern:**
 The script uses Railway CLI commands in this pattern:
-1. **Initial Link**: `railway link -p PROJECT -e ENVIRONMENT -t TEAM -s postgres` (establishes connection)
+1. **Initial Link**: `railway link -p PROJECT -e ENVIRONMENT -t TEAM` (establishes project connection)
 2. **Service Check**: `railway link -p PROJECT -e ENVIRONMENT -t TEAM -s SERVICE_NAME` (checks if service exists)
 3. **Service Selection**: `railway service SERVICE_NAME` (selects service for deployment)
 4. **Deployment**: `railway up` (deploys the selected service)
 
-This ensures all Railway operations use the correct service context.
+This ensures all Railway operations work correctly without trying to link to non-existent services initially.
 
 **Getting your Railway Project Information:**
 ```bash
@@ -495,14 +495,19 @@ The deployment script accepts configuration through command line arguments and o
 
 ## Deployment Examples
 
-### Initial deployment with project:
+### Use default service names (backend, frontend):
 ```bash
 ./reflex-railway-deploy/deploy_all.sh -p my-project --postgres
 ```
 
-### Deploy to team project:
+### Custom service names:
 ```bash
-./reflex-railway-deploy/deploy_all.sh -t my-team -p my-project
+./reflex-railway-deploy/deploy_all.sh -p my-project api web --postgres
+```
+
+### Deploy to team project with custom names:
+```bash
+./reflex-railway-deploy/deploy_all.sh -p my-project server client -t my-team
 ```
 
 ### Deploy to specific environment:
@@ -510,17 +515,12 @@ The deployment script accepts configuration through command line arguments and o
 ./reflex-railway-deploy/deploy_all.sh -p my-project -e staging
 ```
 
-### Complete example with all options:
+### Quick redeploy with custom service names:
 ```bash
-./reflex-railway-deploy/deploy_all.sh -t my-team -p my-project -e production --postgres
+./reflex-railway-deploy/deploy_all.sh -p my-project api web
 ```
 
-### Quick redeploy after code changes:
-```bash
-./reflex-railway-deploy/deploy_all.sh -p my-project
-```
-
-### Force re-initialization of all services:
+### Force re-initialization:
 ```bash
 ./reflex-railway-deploy/deploy_all.sh -p my-project --force-init
 ```
