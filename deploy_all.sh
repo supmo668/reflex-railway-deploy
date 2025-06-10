@@ -153,17 +153,21 @@ get_services_list() {
     echo "$cache_file"
 }
 
-# Check if service exists in Railway project using cached list
+# Check if service exists in Railway project using cached list for the current environment
 service_exists() {
     local service_name=$1
     local cache_file=$(get_services_list)
     
-    # Parse the nested JSON structure to find services
-    # Structure: [{"name": "project", "services": {"edges": [{"node": {"name": "service"}}]}}]
-    jq -e --arg service "$service_name" '
-        .[] | 
-        .services.edges[]?.node | 
-        select(.name == $service)
+    # Parse the nested JSON structure to find services in the current environment
+    # Structure: [{"name": "project", "environments": {"edges": [{"node": {"id": "env_id", "name": "env_name"}}]}, "services": {"edges": [{"node": {"name": "service", "serviceInstances": {"edges": [{"node": {"environmentId": "env_id"}}]}}}]}}]
+    jq -e --arg service "$service_name" --arg env "$RAILWAY_ENVIRONMENT" '
+        .[] as $project |
+        # First get the environment ID for the current environment name
+        ($project.environments.edges[]?.node | select(.name == $env) | .id) as $env_id |
+        # Then check if the service exists and has an instance in this environment
+        $project.services.edges[]?.node |
+        select(.name == $service) |
+        select(.serviceInstances.edges[]?.node.environmentId == $env_id)
     ' "$cache_file" >/dev/null 2>&1
 }
 
