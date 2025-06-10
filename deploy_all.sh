@@ -104,12 +104,14 @@ setup_vars() {
         if [ -n "$DATABASE_URL" ]; then
             export REFLEX_DB_URL="$DATABASE_URL"
             update_env "REFLEX_DB_URL" "$REFLEX_DB_URL" "$ENV_FILE"
+            log "Database URL configured: $REFLEX_DB_URL"
+        else
+            warn "DATABASE_URL not available yet, will be set during deployment URL update"
         fi
     fi
     
-    # Update .env with all variables
-    update_env "REFLEX_API_URL" "$REFLEX_API_URL" "$ENV_FILE"
-    update_env "FRONTEND_DEPLOY_URL" "$FRONTEND_DEPLOY_URL" "$ENV_FILE"
+    # Note: REFLEX_API_URL and FRONTEND_DEPLOY_URL will be set later in update_deployment_urls()
+    # after services are created and domains are available
     
     log "Variables configured: Backend=$BACKEND_NAME, Frontend=$FRONTEND_NAME"
 }
@@ -140,39 +142,51 @@ run_migrations() {
 
 # Get and cache Railway services list
 get_services_list() {
-    local cache_file="/tmp/railway_services_$$.json"
-    
-    if [ ! -f "$cache_file" ]; then
-        log "Fetching Railway services list..."
-        railway list --json > "$cache_file" 2>/dev/null || {
-            warn "Failed to get services list"
-            echo "[]" > "$cache_file"
-        }
-    fi
-    
+    local cache_file="$DEPLOY_DIR/railway_services.json"
+    # Always create a new cache file for the run
+    railway list --json > "$cache_file" 2>/dev/null || {
+        warn "Failed to get services list"
+        echo "[]" > "$cache_file"
+    }
     echo "$cache_file"
 }
 
 # Check if service exists in Railway project using cached list for the current environment
 service_exists() {
     local service_name=$1
-    # Use railway list --json to get all services and check if the service exists
-    local services_json=$(railway list --json 2>/dev/null)
-    if [ -z "$services_json" ]; then
+    local cache_file="$DEPLOY_DIR/railway_services.json"
+    
+    # Check if cache file exists and is readable
+    if [ ! -f "$cache_file" ]; then
         return 1  # Failed to get service list
     fi
     
     # Parse the nested JSON structure to find services in the current environment
     # Structure: [{"name": "project", "environments": {"edges": [{"node": {"id": "env_id", "name": "env_name"}}]}, "services": {"edges": [{"node": {"name": "service", "serviceInstances": {"edges": [{"node": {"environmentId": "env_id"}}]}}}]}}]
-    jq -e --arg service "$service_name" --arg env "$RAILWAY_ENVIRONMENT" '
-        .[] as $project |
-        # First get the environment ID for the current environment name
-        ($project.environments.edges[]?.node | select(.name == $env) | .id) as $env_id |
-        # Then check if the service exists and has an instance in this environment
-        $project.services.edges[]?.node |
-        select(.name == $service) |
-        select(.serviceInstances.edges[]?.node.environmentId == $env_id)
-    ' "$cache_file" >/dev/null 2>&1
+    
+    # Get all environment IDs for the target environment name across all projects
+    local env_ids=$(jq -r --arg env "$RAILWAY_ENVIRONMENT" '
+        .[] | .environments.edges[] | .node | select(.name == $env) | .id
+    ' "$cache_file" 2>/dev/null)
+    
+    # If no environment ID found, service doesn't exist
+    if [ -z "$env_ids" ]; then
+        return 1
+    fi
+    
+    # Check each environment ID for the service
+    for env_id in $env_ids; do
+        # Check if the service exists and has an instance in this environment
+        if jq -e --arg service "$service_name" --arg env_id "$env_id" '
+            .[] | .services.edges[] | .node |
+            select(.name == $service) |
+            select(.serviceInstances.edges[] | .node | .environmentId == $env_id)
+        ' "$cache_file" >/dev/null 2>&1; then
+            return 0
+        fi
+    done
+    
+    return 1
 }
 
 # Check initialization status of all services
@@ -188,12 +202,17 @@ check_services_status() {
         return 0
     fi
 
+    # Get services list once and cache it
+    log "Fetching Railway services list..."
+    get_services_list > /dev/null
+
     # Check if services exist
-    if service_exists "Postgres"; then
+    POSTGRES_SERVICE_NAME="Postgres"
+    if service_exists "$POSTGRES_SERVICE_NAME"; then
         POSTGRES_EXISTS=true
-        success "PostgreSQL service already exists"
+        success "PostgreSQL service $POSTGRES_SERVICE_NAME already exists"
     else
-        log "PostgreSQL service does not exist"
+        log "PostgreSQL service $POSTGRES_SERVICE_NAME does not exist"
     fi
     
     if service_exists "$FRONTEND_NAME"; then
@@ -244,6 +263,7 @@ setup_services() {
     
     # We need to create services, so we'll link when creating the first one
     local first_service_created=false
+    local services_to_redeploy=()
     
     # Create PostgreSQL first if needed (this will establish Railway link)
     if [ "$POSTGRES_NEED_INIT" = true ]; then
@@ -268,6 +288,7 @@ setup_services() {
                 railway add --service "$service" || error "Failed to create $service service"
                 log "$service service created"
             fi
+            services_to_redeploy+=("$service")
         else
             log "Service already exists: $service"
         fi
@@ -291,13 +312,26 @@ setup_services() {
         fi
     fi
     
-    # Sync variables to Railway services only if set_railway_vars.sh exists (only perform once for each service)
+    # Wait for services to be ready before syncing variables
+    if [ ${#services_to_redeploy[@]} -gt 0 ]; then
+        log "Waiting for new services to be ready..."
+        sleep 10
+    fi
+    
+    # Sync variables to Railway services and redeploy newly created services
     if [ -f "$DEPLOY_DIR/set_railway_vars.sh" ]; then
         chmod +x "$DEPLOY_DIR/set_railway_vars.sh"
         
         for service in "$BACKEND_NAME" "$FRONTEND_NAME"; do
             log "Syncing variables to $service"
             "$DEPLOY_DIR/set_railway_vars.sh" -s "$service" -f "$ENV_FILE" || warn "Failed to sync variables to $service"
+            
+            # Redeploy if this service was newly created
+            if [[ " ${services_to_redeploy[@]} " =~ " ${service} " ]]; then
+                log "Redeploying $service with updated environment variables..."
+                railway redeploy -s "$service" || warn "Failed to redeploy $service"
+                success "$service redeployed with correct variables"
+            fi
         done
     else
         warn "set_railway_vars.sh not found, skipping variable sync"
