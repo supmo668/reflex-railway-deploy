@@ -363,31 +363,62 @@ deploy_service() {
 update_deployment_urls() {
     log "Getting deployment URLs..."
     
-    # Get backend domain
-    BACKEND_DOMAIN=$(railway domain --service "$BACKEND_NAME" --json 2>/dev/null | jq -r '.domain // empty' 2>/dev/null || echo "")
+    # Ensure backend public domain exists
+    log "Ensuring backend public domain exists..."
+    railway domain --service "$BACKEND_NAME" >/dev/null 2>&1 || warn "Failed to generate backend public domain"
+
+    # Get backend domain from RAILWAY_PUBLIC_DOMAIN environment variable
+    BACKEND_DOMAIN=$(railway variables --service "$BACKEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
     if [ -z "$BACKEND_DOMAIN" ]; then
-        log "Generating domain for backend service..."
-        railway domain --service "$BACKEND_NAME" >/dev/null 2>&1 || warn "Failed to generate backend domain"
-        sleep 3
+        warn "RAILWAY_PUBLIC_DOMAIN not available for backend service yet, will be set after redeployment"
+        # Fallback to railway domain command as last resort
         BACKEND_DOMAIN=$(railway domain --service "$BACKEND_NAME" --json 2>/dev/null | jq -r '.domain // empty' 2>/dev/null || echo "")
     fi
+
+    # Create frontend domain if it doesn't exist
+    log "Ensuring frontend domain exists..."
+    railway domain --service "$FRONTEND_NAME" >/dev/null 2>&1 || warn "Failed to generate frontend domain"
     
-    # Get frontend domain  
-    FRONTEND_DOMAIN=$(railway domain --service "$FRONTEND_NAME" --json 2>/dev/null | jq -r '.domain // empty' 2>/dev/null || echo "")
+    # Get frontend domain from RAILWAY_PUBLIC_DOMAIN environment variable
+    FRONTEND_DOMAIN=$(railway variables --service "$FRONTEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
     if [ -z "$FRONTEND_DOMAIN" ]; then
-        log "Generating domain for frontend service..."
-        railway domain --service "$FRONTEND_NAME" >/dev/null 2>&1 || warn "Failed to generate frontend domain"
-        sleep 3
+        warn "RAILWAY_PUBLIC_DOMAIN not available for frontend service yet, will be set after redeployment"
+        # Fallback to railway domain command as last resort
         FRONTEND_DOMAIN=$(railway domain --service "$FRONTEND_NAME" --json 2>/dev/null | jq -r '.domain // empty' 2>/dev/null || echo "")
     fi
     
     # Update environment variables only if services were newly created
     if [ "$SERVICES_NEED_INIT" = true ]; then
+        # If RAILWAY_PUBLIC_DOMAIN variables weren't available, redeploy services to make them available
+        need_redeploy=false
+        if [ -z "$(railway variables --service "$BACKEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null)" ]; then
+            log "RAILWAY_PUBLIC_DOMAIN not available for backend, triggering redeploy..."
+            railway redeploy --service "$BACKEND_NAME" || warn "Failed to redeploy backend service"
+            need_redeploy=true
+        fi
+        
+        if [ -z "$(railway variables --service "$FRONTEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null)" ]; then
+            log "RAILWAY_PUBLIC_DOMAIN not available for frontend, triggering redeploy..."
+            railway redeploy --service "$FRONTEND_NAME" || warn "Failed to redeploy frontend service"
+            need_redeploy=true
+        fi
+        
+        # Wait for redeployment if needed
+        if [ "$need_redeploy" = true ]; then
+            log "Waiting for services to redeploy and RAILWAY_PUBLIC_DOMAIN to be available..."
+            sleep 30
+            
+            # Get the domains again after redeploy
+            BACKEND_DOMAIN=$(railway variables --service "$BACKEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
+            FRONTEND_DOMAIN=$(railway variables --service "$FRONTEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
+        fi
+        
         if [ -n "$BACKEND_DOMAIN" ]; then
             REFLEX_API_URL="https://$BACKEND_DOMAIN"
             update_env "REFLEX_API_URL" "$REFLEX_API_URL" "$ENV_FILE"
             # Set for frontend service
             railway variables --service "$FRONTEND_NAME" --set "REFLEX_API_URL=$REFLEX_API_URL" >/dev/null 2>&1 || warn "Failed to set REFLEX_API_URL on frontend"
+            log "Backend API URL set for frontend: $REFLEX_API_URL"
         fi
         
         if [ -n "$FRONTEND_DOMAIN" ]; then
@@ -396,9 +427,10 @@ update_deployment_urls() {
             # Set for both services
             railway variables --service "$BACKEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" >/dev/null 2>&1 || warn "Failed to set FRONTEND_DEPLOY_URL on backend"
             railway variables --service "$FRONTEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" >/dev/null 2>&1 || warn "Failed to set FRONTEND_DEPLOY_URL on frontend"
+            log "Frontend URL set: $FRONTEND_DEPLOY_URL"
         fi
     else
-        log "Services already exist, skipping environment variable updates"
+        log "Services already exist, getting URLs for display purposes only"
         # Just get URLs for display purposes
         if [ -n "$BACKEND_DOMAIN" ]; then
             REFLEX_API_URL="https://$BACKEND_DOMAIN"
