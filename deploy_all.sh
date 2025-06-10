@@ -138,22 +138,33 @@ run_migrations() {
     success "Database ready"
 }
 
-# Check if service exists in Railway project
+# Get and cache Railway services list
+get_services_list() {
+    local cache_file="/tmp/railway_services_$$.json"
+    
+    if [ ! -f "$cache_file" ]; then
+        log "Fetching Railway services list..."
+        railway list --json > "$cache_file" 2>/dev/null || {
+            warn "Failed to get services list"
+            echo "[]" > "$cache_file"
+        }
+    fi
+    
+    echo "$cache_file"
+}
+
+# Check if service exists in Railway project using cached list
 service_exists() {
     local service_name=$1
-    # Use railway list --json to get all services and check if the service exists
-    local services_json=$(railway list --json 2>/dev/null)
-    if [ -z "$services_json" ]; then
-        return 1  # Failed to get service list
-    fi
+    local cache_file=$(get_services_list)
     
     # Parse the nested JSON structure to find services
     # Structure: [{"name": "project", "services": {"edges": [{"node": {"name": "service"}}]}}]
-    echo "$services_json" | jq -e --arg service "$service_name" '
+    jq -e --arg service "$service_name" '
         .[] | 
         .services.edges[]?.node | 
         select(.name == $service)
-    ' >/dev/null 2>&1
+    ' "$cache_file" >/dev/null 2>&1
 }
 
 # Check initialization status of all services
@@ -235,7 +246,7 @@ setup_services() {
         fi
     done
     
-    # Sync variables to Railway services only if set_railway_vars.sh exists
+    # Sync variables to Railway services only if set_railway_vars.sh exists (only perform once)
     if [ -f "$DEPLOY_DIR/set_railway_vars.sh" ]; then
         chmod +x "$DEPLOY_DIR/set_railway_vars.sh"
         
@@ -254,9 +265,30 @@ setup_services() {
 setup_railway_project() {
     header "Linking Railway Project and Setting Environment"
 
-    # First, link to postgres service to establish the initial connection
-    log "Linking to Railway project with postgres service..."
-    railway link -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" -t "$RAILWAY_TEAM" -s postgres || error "Failed to link Railway project. Make sure you are logged in (railway login) and the project/team exists."
+    # Check which services exist to determine which one to link to
+    local link_service=""
+    
+    if service_exists "Postgres"; then
+        link_service="Postgres"
+    elif service_exists "$BACKEND_NAME"; then
+        link_service="$BACKEND_NAME"
+    elif service_exists "$FRONTEND_NAME"; then
+        link_service="$FRONTEND_NAME"
+    else
+        # No services exist yet, we'll need to create one first
+        log "No services exist yet. Creating a temporary service for linking..."
+        railway add --service "temp-service" || error "Failed to create temporary service"
+        link_service="temp-service"
+    fi
+
+    log "Linking to Railway project using service: $link_service"
+    railway link -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" -t "$RAILWAY_TEAM" -s "$link_service" || error "Failed to link Railway project. Make sure you are logged in (railway login) and the project/team exists."
+
+    # Clean up temporary service if we created one
+    if [ "$link_service" = "temp-service" ]; then
+        log "Removing temporary service..."
+        railway service "temp-service" && railway delete --yes >/dev/null 2>&1 || warn "Failed to remove temporary service"
+    fi
 
     success "Railway project linked successfully."
 }
@@ -273,6 +305,8 @@ deploy_service() {
     
     # Set the service 
     railway service "$service_name" || error "Failed to set service to $service_name"
+
+    # Deploy the service
     railway up || error "Failed to deploy $service_name"
     
     success "$service_type deployed"
