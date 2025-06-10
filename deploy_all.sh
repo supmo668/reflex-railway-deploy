@@ -156,20 +156,11 @@ service_exists() {
     ' >/dev/null 2>&1
 }
 
-# Check if service is already initialized (has deployments)
-is_service_initialized() {
-    local service_name=$1
-    local deployment_count=$(railway deployments --service "$service_name" --json 2>/dev/null | jq '. | length' 2>/dev/null || echo "0")
-    [ "$deployment_count" -gt 0 ]
-}
-
 # Check initialization status of all services
 check_services_status() {
     FRONTEND_EXISTS=false
     BACKEND_EXISTS=false
     POSTGRES_EXISTS=false
-    FRONTEND_INITIALIZED=false
-    BACKEND_INITIALIZED=false
     
     if [ "$FORCE_INIT" = true ]; then
         log "Force initialization flag set, treating all services as uninitialized"
@@ -189,12 +180,7 @@ check_services_status() {
     # Check frontend service
     if service_exists "$FRONTEND_NAME"; then
         FRONTEND_EXISTS=true
-        if is_service_initialized "$FRONTEND_NAME"; then
-            FRONTEND_INITIALIZED=true
-            success "Frontend service already initialized"
-        else
-            log "Frontend service exists but not deployed yet"
-        fi
+        success "Frontend service already exists"
     else
         log "Frontend service does not exist"
     fi
@@ -202,12 +188,7 @@ check_services_status() {
     # Check backend service
     if service_exists "$BACKEND_NAME"; then
         BACKEND_EXISTS=true
-        if is_service_initialized "$BACKEND_NAME"; then
-            BACKEND_INITIALIZED=true
-            success "Backend service already initialized"
-        else
-            log "Backend service exists but not deployed yet"
-        fi
+        success "Backend service already exists"
     else
         log "Backend service does not exist"
     fi
@@ -290,7 +271,7 @@ deploy_service() {
     cp "$DEPLOY_DIR/Caddyfile.$service_type" Caddyfile || error "Caddyfile.$service_type not found"
     cp "$DEPLOY_DIR/nixpacks.$service_type.toml" nixpacks.toml || error "nixpacks.$service_type.toml not found"
     
-    # Set the service and deploy
+    # Set the service 
     railway service "$service_name" || error "Failed to set service to $service_name"
     railway up || error "Failed to deploy $service_name"
     
