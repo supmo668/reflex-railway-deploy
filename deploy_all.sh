@@ -187,8 +187,8 @@ check_services_status() {
         POSTGRES_NEED_INIT=true
         return 0
     fi
-    
-    # Check if PostgreSQL service exists
+
+    # Check if services exist
     if service_exists "Postgres"; then
         POSTGRES_EXISTS=true
         success "PostgreSQL service already exists"
@@ -196,20 +196,18 @@ check_services_status() {
         log "PostgreSQL service does not exist"
     fi
     
-    # Check frontend service
     if service_exists "$FRONTEND_NAME"; then
         FRONTEND_EXISTS=true
-        success "Frontend service already exists"
+        success "Frontend service $FRONTEND_NAME already exists"
     else
-        log "Frontend service does not exist"
+        log "Frontend service $FRONTEND_NAME does not exist"
     fi
     
-    # Check backend service
     if service_exists "$BACKEND_NAME"; then
         BACKEND_EXISTS=true
-        success "Backend service already exists"
+        success "Backend service $BACKEND_NAME already exists"
     else
-        log "Backend service does not exist"
+        log "Backend service $BACKEND_NAME does not exist"
     fi
     
     # Set global flags for what needs initialization
@@ -230,8 +228,8 @@ check_services_status() {
     else
         log "Some services need initialization:"
         [ "$POSTGRES_NEED_INIT" = true ] && log "  - PostgreSQL will be created"
-        [ "$FRONTEND_EXISTS" = false ] && log "  - Frontend service will be created"
-        [ "$BACKEND_EXISTS" = false ] && log "  - Backend service will be created"
+        [ "$FRONTEND_EXISTS" = false ] && log "  - Frontend service $FRONTEND_NAME will be created"
+        [ "$BACKEND_EXISTS" = false ] && log "  - Backend service $BACKEND_NAME will be created"
     fi
 }
 
@@ -242,17 +240,56 @@ setup_services() {
         return 0
     fi
     
-    log "Creating Railway services..."
+    header "Linking Railway Project and Setting Up Services"
     
-    # Create services if they don't exist
+    # We need to create services, so we'll link when creating the first one
+    local first_service_created=false
+    
+    # Create PostgreSQL first if needed (this will establish Railway link)
+    if [ "$POSTGRES_NEED_INIT" = true ]; then
+        log "Adding PostgreSQL service..."
+        railway add -d postgres -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" -t "$RAILWAY_TEAM" || error "Failed to add PostgreSQL service"
+        first_service_created=true
+        sleep 15
+        log "PostgreSQL service created and project linked"
+    fi
+    
+    # Create other services if they don't exist
     for service in "$FRONTEND_NAME" "$BACKEND_NAME"; do
         if ! service_exists "$service"; then
             log "Creating service: $service"
-            railway add --service "$service" || error "Failed to create $service service"
+            if [ "$first_service_created" = false ]; then
+                # First service creation with Railway linking
+                railway add --service "$service" -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" -t "$RAILWAY_TEAM" || error "Failed to create $service service"
+                first_service_created=true
+                log "$service service created and project linked"
+            else
+                # Subsequent services (already linked)
+                railway add --service "$service" || error "Failed to create $service service"
+                log "$service service created"
+            fi
         else
             log "Service already exists: $service"
         fi
     done
+    
+    # If all services existed, we need to link to one of them
+    if [ "$first_service_created" = false ]; then
+        local link_service=""
+        if [ "$POSTGRES_EXISTS" = true ]; then
+            link_service="Postgres"
+        elif [ "$BACKEND_EXISTS" = true ]; then
+            link_service="$BACKEND_NAME"  
+        elif [ "$FRONTEND_EXISTS" = true ]; then
+            link_service="$FRONTEND_NAME"
+        fi
+        
+        if [ -n "$link_service" ]; then
+            log "Linking to existing service: $link_service"
+            railway link -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" -t "$RAILWAY_TEAM" -s "$link_service" || error "Failed to link to $link_service"
+            log "Railway project linked successfully"
+        fi
+    fi
     
     # Sync variables to Railway services only if set_railway_vars.sh exists (only perform once for each service)
     if [ -f "$DEPLOY_DIR/set_railway_vars.sh" ]; then
@@ -267,38 +304,6 @@ setup_services() {
     fi
     
     success "Services configured"
-}
-
-# Function to link Railway project and set environment
-setup_railway_project() {
-    header "Linking Railway Project and Setting Environment"
-
-    # Check which services exist to determine which one to link to
-    local link_service=""
-    
-    if service_exists "Postgres"; then
-        link_service="Postgres"
-    elif service_exists "$BACKEND_NAME"; then
-        link_service="$BACKEND_NAME"
-    elif service_exists "$FRONTEND_NAME"; then
-        link_service="$FRONTEND_NAME"
-    else
-        # No services exist yet, we'll need to create one first
-        log "No services exist yet. Creating a temporary service for linking..."
-        railway add --service "temp-service" || error "Failed to create temporary service"
-        link_service="temp-service"
-    fi
-
-    log "Linking to Railway project using service: $link_service"
-    railway link -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" -t "$RAILWAY_TEAM" -s "$link_service" || error "Failed to link Railway project. Make sure you are logged in (railway login) and the project/team exists."
-
-    # Clean up temporary service if we created one
-    if [ "$link_service" = "temp-service" ]; then
-        log "Removing temporary service..."
-        railway service "temp-service" && railway delete --yes >/dev/null 2>&1 || warn "Failed to remove temporary service"
-    fi
-
-    success "Railway project linked successfully."
 }
 
 # Deploy service
@@ -458,9 +463,6 @@ echo "Frontend: $FRONTEND_NAME | Backend: $BACKEND_NAME"
 echo "PostgreSQL: $([ "$ENABLE_POSTGRES" = true ] && echo "Enabled" || echo "Disabled") | Force Init: $([ "$FORCE_INIT" = true ] && echo "Yes" || echo "No")"
 
 # Main deployment flow
-setup_railway_project
-pause_for_verification "Railway project linked and environment set. Ready to proceed with variable setup."
-
 validate_env
 pause_for_verification "Environment validation complete. Ready to initialize Railway project."
 
