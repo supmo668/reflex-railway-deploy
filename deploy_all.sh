@@ -153,18 +153,26 @@ get_services_list() {
     echo "$cache_file"
 }
 
-# Check if service exists in Railway project using cached list
+# Check if service exists in Railway project for the current environment
 service_exists() {
     local service_name=$1
-    local cache_file=$(get_services_list)
+    # Use railway list --json to get all services and check if the service exists
+    local services_json=$(railway list --json 2>/dev/null)
+    if [ -z "$services_json" ]; then
+        return 1  # Failed to get service list
+    fi
     
-    # Parse the nested JSON structure to find services
-    # Structure: [{"name": "project", "services": {"edges": [{"node": {"name": "service"}}]}}]
-    jq -e --arg service "$service_name" '
-        .[] | 
-        .services.edges[]?.node | 
-        select(.name == $service)
-    ' "$cache_file" >/dev/null 2>&1
+    # Parse the nested JSON structure to find services in the current environment
+    # Structure: [{"name": "project", "environments": {"edges": [{"node": {"id": "env_id", "name": "env_name"}}]}, "services": {"edges": [{"node": {"name": "service", "serviceInstances": {"edges": [{"node": {"environmentId": "env_id"}}]}}}]}}]
+    echo "$services_json" | jq -e --arg service "$service_name" --arg env "$RAILWAY_ENVIRONMENT" '
+        .[] as $project |
+        # First get the environment ID for the current environment name
+        ($project.environments.edges[]?.node | select(.name == $env) | .id) as $env_id |
+        # Then check if the service exists and has an instance in this environment
+        $project.services.edges[]?.node |
+        select(.name == $service) |
+        select(.serviceInstances.edges[]?.node.environmentId == $env_id)
+    ' >/dev/null 2>&1
 }
 
 # Check initialization status of all services
@@ -246,7 +254,7 @@ setup_services() {
         fi
     done
     
-    # Sync variables to Railway services only if set_railway_vars.sh exists (only perform once)
+    # Sync variables to Railway services only if set_railway_vars.sh exists (only perform once for each service)
     if [ -f "$DEPLOY_DIR/set_railway_vars.sh" ]; then
         chmod +x "$DEPLOY_DIR/set_railway_vars.sh"
         
