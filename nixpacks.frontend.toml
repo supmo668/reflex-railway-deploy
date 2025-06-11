@@ -8,16 +8,39 @@ providers = ['python']
     NPM_CONFIG_UPDATE_NOTIFIER = 'false' # the update check is relatively useless in a production environment
     NPM_CONFIG_FUND = 'false' # the fund notification is also relatively useless in a production environment
     PIP_DISABLE_PIP_VERSION_CHECK = '1' # the update check is relatively useless in a production environment
+    NIXPACKS_DEBIAN_PACKAGES = "libstdc++6,build-essential,gcc,g++,libc6-dev,git" # system dependencies for numpy/scientific libraries
+    LD_LIBRARY_PATH = "/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu:/usr/lib:/lib"
+    CC = "gcc"
+    CXX = "g++"
+    # Use a more compatible base image
+    NIXPACKS_BASE_IMAGE = "python:3.11-slim-bullseye"
+
+# system dependencies setup phase
+[phases.system]
+    aptPkgs = ['libstdc++6', 'build-essential', 'gcc', 'g++', 'libc6-dev', 'git', 'ca-certificates', 'curl']
+    cmds = [
+        'apt-get update && apt-get install -y --no-install-recommends libstdc++6 build-essential gcc g++ libc6-dev git ca-certificates curl',
+        'python -m pip install --upgrade pip setuptools wheel'
+    ]
 
 # default setup phase
 [phases.setup]
+    dependsOn = ['system']
     nixPkgs = ['...', 'unzip', 'parallel'] # install unzip because reflex needs it, and install parallel to run the frontend and backend at the same time
     nixLibs = ['zlib']
+
+# custom install phase to handle dependencies more robustly
+[phases.install]
+    dependsOn = ['setup']
+    cmds = [
+        'python -m pip install --no-cache-dir --upgrade pip setuptools wheel',
+        'python -m pip install --no-cache-dir -r requirements.txt'
+    ]
 
 # reflex init phase
 [phases.init]
     dependsOn = ['install'] # run after install (install is the default phase for installing the python modules)
-    cmds = ['reflex init'] # re-initialize the app with the latest template
+    cmds = ['reflex init --loglevel debug'] # re-initialize the app with the latest template
 
 # export frontend phase
 [phases.export]
@@ -25,8 +48,9 @@ providers = ['python']
     cmds = [
         'FRONTEND_DEPLOY_URL="${FRONTEND_DEPLOY_URL}"',
         'REFLEX_API_URL="${REFLEX_API_URL}"',
-        'reflex export --frontend-only --no-zip'
+        'reflex export --frontend-only --no-zip --loglevel debug'
     ]
+    # export the frontend with debug logging
     # export the backend
 
 # install caddy phase
@@ -42,5 +66,5 @@ providers = ['python']
 
 # start phase
 [start]
-    cmd = 'REFLEX_ACCESS_TOKEN="${REFLEX_CLOUD_TOKEN}" REFLEX_SHOW_BUILT_WITH_REFLEX=0 FRONTEND_DEPLOY_URL="${FRONTEND_DEPLOY_URL}" REFLEX_API_URL="${REFLEX_API_URL}" reflex run --frontend-only --env ${REFLEX_ENV_MODE:-prod} && caddy run 2>&1'
+    cmd = 'REFLEX_ACCESS_TOKEN="${REFLEX_ACCESS_TOKEN}" REFLEX_SHOW_BUILT_WITH_REFLEX=0 FRONTEND_DEPLOY_URL="${FRONTEND_DEPLOY_URL}" REFLEX_API_URL="${REFLEX_API_URL}" reflex run --frontend-only --env ${REFLEX_ENV_MODE:-prod} && caddy run 2>&1'
     # run the backend and caddy in parallel, this will fail fast if either service crashes allowing railway to restart the deployment

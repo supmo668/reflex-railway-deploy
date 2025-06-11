@@ -1,0 +1,58 @@
+# Alternative nixpacks configuration for frontend using uv package manager
+# Use this if the main config fails with VDSO errors
+
+providers = ['python']
+
+[variables]
+    NEXT_TELEMETRY_DISABLED = '1'
+    NPM_CONFIG_UPDATE_NOTIFIER = 'false'
+    NPM_CONFIG_FUND = 'false'
+    PIP_DISABLE_PIP_VERSION_CHECK = '1'
+    LD_LIBRARY_PATH = "/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu:/usr/lib:/lib"
+    CC = "gcc"
+    CXX = "g++"
+    # Use Python base image which includes apt-get
+    NIXPACKS_BASE_IMAGE = "python:3.11-bullseye"
+    DEBIAN_FRONTEND = "noninteractive"
+
+[phases.python-install]
+    aptPkgs = ['build-essential', 'gcc', 'g++', 'git', 'curl', 'ca-certificates', 'libstdc++6']
+    cmds = [
+        'python --version',
+        'python -m pip --version --break-system-packages || (curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python get-pip.py --break-system-packages)',
+        'python -m pip --version --break-system-packages'
+    ]
+
+[phases.uv-install]
+    dependsOn = ['python-install']
+    cmds = [
+        'python -m pip install --break-system-packages uv',
+        'python -m uv --version'
+    ]
+
+[phases.deps]
+    dependsOn = ['uv-install']
+    cmds = [
+        'uv sync --frozen',
+        'python -c "import reflex; print(f\"Reflex version: {reflex.__version__}\")"'
+    ]
+
+[phases.reflex-setup]
+    dependsOn = ['deps']
+    cmds = ['reflex init --loglevel debug']
+
+[phases.export]
+    dependsOn = ['reflex-setup']
+    cmds = [
+        'FRONTEND_DEPLOY_URL="${FRONTEND_DEPLOY_URL}"',
+        'REFLEX_API_URL="${REFLEX_API_URL}"',
+        'reflex export --frontend-only --no-zip --loglevel debug'
+    ]
+
+[phases.caddy]
+    dependsOn = ['export']
+    aptPkgs = ['caddy']
+    cmds = ['caddy fmt --overwrite Caddyfile || echo "Caddyfile formatting skipped"']
+
+[start]
+    cmd = 'REFLEX_ACCESS_TOKEN="${REFLEX_ACCESS_TOKEN}" REFLEX_SHOW_BUILT_WITH_REFLEX=0 FRONTEND_DEPLOY_URL="${FRONTEND_DEPLOY_URL}" REFLEX_API_URL="${REFLEX_API_URL}" reflex run --frontend-only --env ${REFLEX_ENV_MODE:-prod} && caddy run 2>&1'
