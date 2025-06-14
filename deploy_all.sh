@@ -3,23 +3,12 @@
 # 
 # This script intelligently handles both initial deployments and subsequent redeployments:
 # - For new projects: Creates PostgreSQL, frontend, and backend services, configures variables, runs migrations
-# - For existing projects: Skips service creation and setup, only copies configs and # Show config and deploy
+# - For existing projects: Runs migrations and redeploys services with fresh configs
 header "Railway Deployment for $APP_NAME"
 echo "Project: $RAILWAY_PROJECT"
 echo "Team: $RAILWAY_TEAM"
 echo "Environment: $RAILWAY_ENVIRONMENT"
 echo "Frontend: $FRONTEND_NAME | Backend: $BACKEND_NAME"
-if [ "$ENABLE_POSTGRES" = true ]; then
-    POSTGRES_STATUS="Enabled"
-else
-    POSTGRES_STATUS="Disabled"
-fi
-if [ "$FORCE_INIT" = true ]; then
-    FORCE_STATUS="Yes"
-else
-    FORCE_STATUS="No"
-fi
-echo "PostgreSQL: $POSTGRES_STATUS | Force Init: $FORCE_STATUS"ys
 # - Always copies fresh Caddyfile and nixpacks.toml files before deployment
 # - Automatically detects which services exist to minimize unnecessary operations
 
@@ -59,11 +48,6 @@ init_project() {
 
 # Deploy PostgreSQL
 deploy_postgres() {
-    if [ "$ENABLE_POSTGRES" = false ]; then
-        log "PostgreSQL deployment disabled"
-        return 0
-    fi
-    
     if [ "$POSTGRES_NEED_INIT" = false ]; then
         success "PostgreSQL already exists, skipping"
         return 0
@@ -87,27 +71,66 @@ update_env() {
     fi
 }
 
-# Setup Railway variables and database
-setup_vars() {
-    if [ "$SERVICES_NEED_INIT" = false ]; then
-        log "Services already exist, skipping variable setup"
-        return 0
+# Build environment variable string for Railway service creation
+build_env_vars() {
+    local service_type=$1
+    local env_vars=""
+    
+    # Core variables that both services need
+    if [ -n "$REFLEX_DB_URL" ]; then
+        env_vars="${env_vars} -v REFLEX_DB_URL=\"$REFLEX_DB_URL\""
     fi
     
+    # Add essential variables from .env file if they exist
+    if [ -f "$ENV_FILE" ]; then
+        while IFS='=' read -r key value; do
+            # Skip comments and empty lines
+            [[ $key =~ ^[[:space:]]*# ]] && continue
+            [[ -z "$key" ]] && continue
+            
+            # Add important variables that are typically available
+            case $key in
+                REFLEX_ACCESS_TOKEN|REFLEX_CLOUD_TOKEN|REFLEX_ENV_MODE|REFLEX_SHOW_BUILT_WITH_REFLEX)
+                    # Remove quotes if present and add to env_vars
+                    clean_value=$(echo "$value" | sed 's/^["'\'']*//;s/["'\'']*$//')
+                    env_vars="${env_vars} -v ${key}=\"${clean_value}\""
+                    ;;
+            esac
+        done < "$ENV_FILE"
+    fi
+    
+    # Note: FRONTEND_DEPLOY_URL and REFLEX_API_URL will be set later via update_deployment_urls
+    # since they depend on the services being created first
+    
+    log "Environment variables for $service_type: ${env_vars#* }"  # Remove leading space
+    echo "$env_vars"
+}
+
+# Setup Railway variables and database
+setup_vars() {
     # Service configuration
     BACKEND_NAME=${BACKEND_NAME:-"backend"}
     FRONTEND_NAME=${FRONTEND_NAME:-"frontend"}
     
-    # Get database URL if PostgreSQL enabled
-    if [ "$ENABLE_POSTGRES" = true ]; then
-        DATABASE_URL=$(railway variables --service "Postgres" --json 2>/dev/null | jq -r '.DATABASE_URL // empty' 2>/dev/null || echo "")
-        if [ -n "$DATABASE_URL" ]; then
-            export REFLEX_DB_URL="$DATABASE_URL"
-            update_env "REFLEX_DB_URL" "$REFLEX_DB_URL" "$ENV_FILE"
-            log "Database URL configured: $REFLEX_DB_URL"
-        else
-            warn "DATABASE_URL not available yet, will be set during deployment URL update"
-        fi
+    # Always get database URLs from PostgreSQL service
+    log "Getting database URLs from PostgreSQL service..."
+    DATABASE_URL=$(railway variables --service "Postgres" --json 2>/dev/null | jq -r '.DATABASE_URL // empty' 2>/dev/null || echo "")
+    DATABASE_PUBLIC_URL=$(railway variables --service "Postgres" --json 2>/dev/null | jq -r '.DATABASE_PUBLIC_URL // empty' 2>/dev/null || echo "")
+    
+    if [ -n "$DATABASE_URL" ]; then
+        export REFLEX_DB_URL="$DATABASE_URL"
+        update_env "REFLEX_DB_URL" "$REFLEX_DB_URL" "$ENV_FILE"
+        log "Database URL configured: $REFLEX_DB_URL"
+    else
+        warn "DATABASE_URL not available yet, will be retrieved after PostgreSQL setup"
+    fi
+    
+    if [ -n "$DATABASE_PUBLIC_URL" ]; then
+        export DATABASE_PUBLIC_URL
+        update_env "DATABASE_PUBLIC_URL" "$DATABASE_PUBLIC_URL" "$ENV_FILE"
+        log "Public database URL configured for migrations"
+    else
+        warn "DATABASE_PUBLIC_URL not available yet, will be retrieved after PostgreSQL setup"
     fi
     
     # Note: REFLEX_API_URL and FRONTEND_DEPLOY_URL will be set later in update_deployment_urls()
@@ -118,26 +141,50 @@ setup_vars() {
 
 # Run database migrations
 run_migrations() {
-    if [ "$ENABLE_POSTGRES" = false ]; then
-        log "PostgreSQL disabled, skipping migrations"
+    log "Running database migrations..."
+    
+    # Always get the latest database URLs from PostgreSQL service
+    DATABASE_URL=$(railway variables --service "Postgres" --json 2>/dev/null | jq -r '.DATABASE_URL // empty' 2>/dev/null || echo "")
+    DATABASE_PUBLIC_URL=$(railway variables --service "Postgres" --json 2>/dev/null | jq -r '.DATABASE_PUBLIC_URL // empty' 2>/dev/null || echo "")
+    
+    # Use DATABASE_PUBLIC_URL for migrations if available, otherwise fall back to DATABASE_URL
+    MIGRATION_URL="${DATABASE_PUBLIC_URL:-$DATABASE_URL}"
+    
+    if [ -z "$MIGRATION_URL" ]; then
+        warn "No database URL found, skipping migrations"
         return 0
     fi
     
-    if [ "$POSTGRES_NEED_INIT" = false ]; then
-        log "PostgreSQL already exists, skipping migrations"
-        return 0
+    log "Running database setup with URL: ${MIGRATION_URL:0:20}..."
+    export DATABASE_URL="$MIGRATION_URL"
+    
+    # Update .env file with latest database URLs
+    if [ -n "$DATABASE_URL" ]; then
+        update_env "REFLEX_DB_URL" "$DATABASE_URL" "$ENV_FILE"
+    fi
+    if [ -n "$DATABASE_PUBLIC_URL" ]; then
+        update_env "DATABASE_PUBLIC_URL" "$DATABASE_PUBLIC_URL" "$ENV_FILE"
     fi
     
-    if [ -z "$DATABASE_URL" ]; then
-        warn "No DATABASE_URL found, skipping migrations"
-        return 0
+    # Run migrations
+    log "Initializing database..."
+    if REFLEX_DB_URL="$MIGRATION_URL" uv run reflex db init; then
+        success "Database initialization completed"
+    else
+        warn "Database initialization failed or was already done"
     fi
-    
-    log "Running database setup..."
-    export DATABASE_URL
-    REFLEX_DB_URL=$DATABASE_URL reflex db init 2>/dev/null || true
-    REFLEX_DB_URL=$DATABASE_URL reflex db migrate 2>/dev/null || true
-    success "Database ready"
+    log "Updating database migrations..."
+    if REFLEX_DB_URL="$MIGRATION_URL" uv run reflex db makemigrations; then
+        success "Database update migration completed"
+    else
+        warn "Database update migration failed or was already done"
+    fi    
+    log "Running database migrations..."
+    if REFLEX_DB_URL="$MIGRATION_URL" uv run reflex db migrate; then
+        success "Database migrations completed successfully"
+    else
+        error "Database migrations failed"
+    fi
 }
 
 # Get and cache Railway services list
@@ -237,7 +284,7 @@ check_services_status() {
         SERVICES_NEED_INIT=true
     fi
     
-    if [ "$POSTGRES_EXISTS" = false ] && [ "$ENABLE_POSTGRES" = true ]; then
+    if [ "$POSTGRES_EXISTS" = false ]; then
         POSTGRES_NEED_INIT=true
     fi
     
@@ -278,14 +325,28 @@ setup_services() {
     for service in "$FRONTEND_NAME" "$BACKEND_NAME"; do
         if ! service_exists "$service"; then
             log "Creating service: $service"
+            
+            # Determine service type for environment variables
+            local service_type=""
+            if [ "$service" = "$FRONTEND_NAME" ]; then
+                service_type="frontend"
+            elif [ "$service" = "$BACKEND_NAME" ]; then
+                service_type="backend"
+            fi
+            
+            # Build environment variables string
+            local env_vars=$(build_env_vars "$service_type")
+            
             if [ "$first_service_created" = false ]; then
                 # First service creation with Railway linking
-                railway add --service "$service" -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" -t "$RAILWAY_TEAM" || error "Failed to create $service service"
+                log "Creating $service with environment variables..."
+                eval "railway add --service \"$service\" -p \"$RAILWAY_PROJECT\" -e \"$RAILWAY_ENVIRONMENT\" -t \"$RAILWAY_TEAM\" $env_vars" || error "Failed to create $service service"
                 first_service_created=true
                 log "$service service created and project linked"
             else
                 # Subsequent services (already linked)
-                railway add --service "$service" || error "Failed to create $service service"
+                log "Creating $service with environment variables..."
+                eval "railway add --service \"$service\" $env_vars" || error "Failed to create $service service"
                 log "$service service created"
             fi
             services_to_redeploy+=("$service")
@@ -324,7 +385,16 @@ setup_services() {
         
         for service in "$BACKEND_NAME" "$FRONTEND_NAME"; do
             log "Syncing variables to $service"
-            "$DEPLOY_DIR/set_railway_vars.sh" -s "$service" -f "$ENV_FILE" || warn "Failed to sync variables to $service"
+            # For new services, exclude variables that are derived from other Railway services
+            local exclude_vars="REFLEX_DB_URL,DATABASE_PUBLIC_URL,REFLEX_API_URL,FRONTEND_DEPLOY_URL"
+            if output=$("$DEPLOY_DIR/set_railway_vars.sh" -s "$service" -f "$ENV_FILE" -e "$exclude_vars" 2>&1); then
+                log "Variable sync completed for $service"
+                echo "$output"
+            else
+                error "Failed to sync variables to $service. Error output:"
+                echo "$output"
+                exit 1
+            fi
             
             # Redeploy if this service was newly created
             if [[ " ${services_to_redeploy[@]} " =~ " ${service} " ]]; then
@@ -353,8 +423,41 @@ deploy_service() {
     # Set the service 
     railway service "$service_name" || error "Failed to set service to $service_name"
 
+    # Check if this is a new service or existing service
+    local service_exists_flag=false
+    if [ "$service_name" = "$FRONTEND_NAME" ] && [ "$FRONTEND_EXISTS" = true ]; then
+        service_exists_flag=true
+    elif [ "$service_name" = "$BACKEND_NAME" ] && [ "$BACKEND_EXISTS" = true ]; then
+        service_exists_flag=true
+    fi
+    
     # Deploy the service
-    railway up || error "Failed to deploy $service_name"
+    if [ "$service_exists_flag" = true ]; then
+        log "Service already exists, using redeploy..."
+        
+        # For existing services, sync variables from .env excluding Railway service-derived ones
+        if [ -f "$DEPLOY_DIR/set_railway_vars.sh" ]; then
+            log "Syncing variables to existing service $service_name"
+            # Exclude variables that are derived from other Railway services
+            local exclude_vars="REFLEX_DB_URL,DATABASE_PUBLIC_URL,REFLEX_API_URL,FRONTEND_DEPLOY_URL"
+            chmod +x "$DEPLOY_DIR/set_railway_vars.sh"
+            if output=$("$DEPLOY_DIR/set_railway_vars.sh" -s "$service_name" -f "$ENV_FILE" -e "$exclude_vars" 2>&1); then
+                log "Variable sync completed for $service_name"
+                echo "$output"
+            else
+                error "Failed to sync variables to $service_name. Error output:"
+                echo "$output"
+                exit 1
+            fi
+        else
+            warn "set_railway_vars.sh not found, skipping variable sync for redeploy"
+        fi
+        
+        railway redeploy -s "$service_name" || error "Failed to redeploy $service_name"
+    else
+        log "New service, using up..."
+        railway up || error "Failed to deploy $service_name"
+    fi
     
     success "$service_type deployed"
 }
@@ -453,7 +556,7 @@ deploy_all() {
 }
 
 # Main execution
-ENV_FILE=".env" DEPLOY_DIR="reflex-railway-deploy" ENABLE_POSTGRES=true FORCE_INIT=false
+ENV_FILE=".env" DEPLOY_DIR="reflex-railway-deploy" FORCE_INIT=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -473,8 +576,6 @@ while [[ $# -gt 0 ]]; do
             echo "  -e, --environment ENV     Railway environment (default: production)"
             echo "  -f, --file FILE           Environment file to use (default: .env)"
             echo "  -d, --deploy-dir DIR      Deploy directory (default: reflex-railway-deploy)"
-            echo "      --no-postgres         Skip PostgreSQL deployment"
-            echo "      --postgres            Enable PostgreSQL deployment (default)"
             echo "      --force-init          Force re-initialization even if services exist"
             echo ""
             echo "Examples:"
@@ -487,8 +588,6 @@ while [[ $# -gt 0 ]]; do
         -e|--environment) RAILWAY_ENVIRONMENT="$2"; shift 2 ;;
         -f|--file) ENV_FILE="$2"; shift 2 ;;
         -d|--deploy-dir) DEPLOY_DIR="$2"; shift 2 ;;
-        --no-postgres) ENABLE_POSTGRES=false; shift ;;
-        --postgres) ENABLE_POSTGRES=true; shift ;;
         --force-init) FORCE_INIT=true; shift ;;
         -*) error "Unknown option: $1" ;;
         *) 
@@ -526,7 +625,6 @@ RAILWAY_TEAM=${RAILWAY_TEAM:-"personal"}
 header "Railway Deployment for $APP_NAME"
 echo "Project ID: $RAILWAY_PROJECT_ID"
 echo "Frontend: $FRONTEND_NAME | Backend: $BACKEND_NAME"
-echo "PostgreSQL: $([ "$ENABLE_POSTGRES" = true ] && echo "Enabled" || echo "Disabled") | Force Init: $([ "$FORCE_INIT" = true ] && echo "Yes" || echo "No")"
 
 # Main deployment flow
 validate_env
@@ -545,15 +643,17 @@ if [ "$SERVICES_NEED_INIT" = true ] || [ "$POSTGRES_NEED_INIT" = true ]; then
     setup_vars
     pause_for_verification "Environment variables setup complete. Ready to run database migrations."
     
-    run_migrations
-    pause_for_verification "Database migrations complete. Ready to setup Railway services."
-    
     setup_services
-    pause_for_verification "Railway services setup complete. Ready to deploy all services."
+    pause_for_verification "Railway services setup complete. Ready to run database migrations."
 else
-    log "All services already exist. Skipping PostgreSQL, variables, migrations, and service setup."
-    pause_for_verification "Service status checked. All services already exist. Ready to deploy services."
+    log "All services already exist. Getting latest database configuration and running migrations."
+    setup_vars  # Ensure we have latest database URLs even for existing services
+    pause_for_verification "Service status checked. All services already exist. Ready to run database migrations."
 fi
+
+# Always run migrations to ensure database is up to date
+run_migrations
+pause_for_verification "Database migrations complete. Ready to deploy all services."
 
 deploy_all
 
@@ -561,5 +661,5 @@ deploy_all
 header "Deployment Complete"
 echo "✓ Frontend: https://$FRONTEND_DOMAIN"
 echo "✓ Backend: https://$BACKEND_DOMAIN" 
-[ "$ENABLE_POSTGRES" = true ] && echo "✓ PostgreSQL: Database running"
-echo "Commands: railway status | railway logs --service <name> | railway variables --service <name>"
+echo "✓ PostgreSQL: Database running"
+echo "Commands used (FYI): railway list | railway status | railway add -s <name> -v [<variables>] | railway up | railway variables --service <name> | railway deploy"
