@@ -396,6 +396,18 @@ setup_services() {
                 exit 1
             fi
             
+            # Always update REFLEX_DB_URL from Postgres service to maintain consistency
+            log "Updating REFLEX_DB_URL for $service from Postgres service"
+            if [ -n "$DATABASE_URL" ]; then
+                if railway variables --service "$service" --set "REFLEX_DB_URL=$DATABASE_URL" >/dev/null 2>&1; then
+                    log "✓ REFLEX_DB_URL updated for $service"
+                else
+                    warn "Failed to set REFLEX_DB_URL for $service"
+                fi
+            else
+                warn "DATABASE_URL not available, skipping REFLEX_DB_URL update for $service"
+            fi
+            
             # Redeploy if this service was newly created
             if [[ " ${services_to_redeploy[@]} " =~ " ${service} " ]]; then
                 log "Redeploying $service with updated environment variables..."
@@ -448,6 +460,18 @@ deploy_service() {
                 error "Failed to sync variables to $service_name. Error output:"
                 echo "$output"
                 exit 1
+            fi
+            
+            # Always update REFLEX_DB_URL from Postgres service to maintain consistency
+            log "Updating REFLEX_DB_URL for $service_name from Postgres service"
+            if [ -n "$DATABASE_URL" ]; then
+                if railway variables --service "$service_name" --set "REFLEX_DB_URL=$DATABASE_URL" >/dev/null 2>&1; then
+                    log "✓ REFLEX_DB_URL updated for $service_name"
+                else
+                    warn "Failed to set REFLEX_DB_URL for $service_name"
+                fi
+            else
+                warn "DATABASE_URL not available, skipping REFLEX_DB_URL update for $service_name"
             fi
         else
             warn "set_railway_vars.sh not found, skipping variable sync for redeploy"
