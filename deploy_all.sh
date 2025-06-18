@@ -408,6 +408,22 @@ setup_services() {
                 warn "DATABASE_URL not available, skipping REFLEX_DB_URL update for $service"
             fi
             
+            # Always update REFLEX_API_URL for frontend service from backend's RAILWAY_PUBLIC_DOMAIN
+            if [ "$service" = "$FRONTEND_NAME" ]; then
+                log "Updating REFLEX_API_URL for frontend service from backend's RAILWAY_PUBLIC_DOMAIN"
+                BACKEND_DOMAIN=$(railway variables --service "$BACKEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
+                if [ -n "$BACKEND_DOMAIN" ]; then
+                    REFLEX_API_URL="https://$BACKEND_DOMAIN"
+                    if railway variables --service "$service" --set "REFLEX_API_URL=$REFLEX_API_URL" >/dev/null 2>&1; then
+                        log "✓ REFLEX_API_URL updated for frontend: $REFLEX_API_URL"
+                    else
+                        warn "Failed to set REFLEX_API_URL for frontend"
+                    fi
+                else
+                    warn "Backend RAILWAY_PUBLIC_DOMAIN not available yet, REFLEX_API_URL will be set after backend deployment"
+                fi
+            fi
+            
             # Redeploy if this service was newly created
             if [[ " ${services_to_redeploy[@]} " =~ " ${service} " ]]; then
                 log "Redeploying $service with updated environment variables..."
@@ -472,6 +488,22 @@ deploy_service() {
                 fi
             else
                 warn "DATABASE_URL not available, skipping REFLEX_DB_URL update for $service_name"
+            fi
+            
+            # Always update REFLEX_API_URL for frontend service from backend's RAILWAY_PUBLIC_DOMAIN
+            if [ "$service_name" = "$FRONTEND_NAME" ]; then
+                log "Updating REFLEX_API_URL for frontend service from backend's RAILWAY_PUBLIC_DOMAIN"
+                BACKEND_DOMAIN=$(railway variables --service "$BACKEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
+                if [ -n "$BACKEND_DOMAIN" ]; then
+                    REFLEX_API_URL="https://$BACKEND_DOMAIN"
+                    if railway variables --service "$service_name" --set "REFLEX_API_URL=$REFLEX_API_URL" >/dev/null 2>&1; then
+                        log "✓ REFLEX_API_URL updated for frontend: $REFLEX_API_URL"
+                    else
+                        warn "Failed to set REFLEX_API_URL for frontend"
+                    fi
+                else
+                    warn "Backend RAILWAY_PUBLIC_DOMAIN not available yet, REFLEX_API_URL will be set after backend deployment"
+                fi
             fi
         else
             warn "set_railway_vars.sh not found, skipping variable sync for redeploy"
@@ -557,13 +589,20 @@ update_deployment_urls() {
             log "Frontend URL set: $FRONTEND_DEPLOY_URL"
         fi
     else
-        log "Services already exist, getting URLs for display purposes only"
-        # Just get URLs for display purposes
+        log "Services already exist, setting URLs for existing services"
+        # For existing services, still set REFLEX_API_URL for frontend from backend domain
         if [ -n "$BACKEND_DOMAIN" ]; then
             REFLEX_API_URL="https://$BACKEND_DOMAIN"
+            # Always set REFLEX_API_URL for frontend service, even for existing services
+            railway variables --service "$FRONTEND_NAME" --set "REFLEX_API_URL=$REFLEX_API_URL" >/dev/null 2>&1 || warn "Failed to set REFLEX_API_URL on frontend"
+            log "Backend API URL set for frontend: $REFLEX_API_URL"
         fi
         if [ -n "$FRONTEND_DOMAIN" ]; then
             FRONTEND_DEPLOY_URL="https://$FRONTEND_DOMAIN"
+            # Optionally set FRONTEND_DEPLOY_URL for existing services too
+            railway variables --service "$BACKEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" >/dev/null 2>&1 || warn "Failed to set FRONTEND_DEPLOY_URL on backend"
+            railway variables --service "$FRONTEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" >/dev/null 2>&1 || warn "Failed to set FRONTEND_DEPLOY_URL on frontend"
+            log "Frontend URL set: $FRONTEND_DEPLOY_URL"
         fi
     fi
     
