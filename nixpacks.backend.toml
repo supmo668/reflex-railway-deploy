@@ -9,32 +9,32 @@ providers = ['python']
     NPM_CONFIG_FUND = 'false' # the fund notification is also relatively useless in a production environment
     PIP_DISABLE_PIP_VERSION_CHECK = '1' # the update check is relatively useless in a production environment
 
+# default setup phase
+[phases.setup]
+    nixPkgs = ['...', 'unzip', 'parallel', 'curl'] # install unzip because reflex needs it, parallel for running services, and curl for downloading uv
+    nixLibs = ['zlib']
+
 # install uv package manager
 [phases.uv-install]
-    cmds = ['pip install uv']
+    dependsOn = ['setup']
+    cmds = ['curl -LsSf https://astral.sh/uv/install.sh | sh && echo "export PATH=\"$HOME/.cargo/bin:$PATH\"" >> ~/.bashrc']
 
 # install dependencies using uv and pyproject.toml
 [phases.install]
     dependsOn = ['uv-install']
-    cmds = ['uv sync']
-
-# default setup phase
-[phases.setup]
-    dependsOn = ['install']
-    nixPkgs = ['...', 'unzip', 'parallel'] # install unzip because reflex needs it, and install parallel to run the frontend and backend at the same time
-    nixLibs = ['zlib']
+    cmds = ['export PATH="$HOME/.cargo/bin:$PATH" && uv sync']
 
 # reflex init phase
 [phases.init]
-    dependsOn = ['setup'] # run after setup
-    cmds = ['uv run reflex init'] # re-initialize the app with the latest template using uv
+    dependsOn = ['install'] # run after install
+    cmds = ['export PATH="$HOME/.cargo/bin:$PATH" && uv run reflex init'] # re-initialize the app with the latest template using uv
 
 # export backend phase
 [phases.export]
     dependsOn = ['init'] # run after init
     cmds = [
         'FRONTEND_DEPLOY_URL="${FRONTEND_DEPLOY_URL}"',
-        'uv run reflex export --backend-only --no-zip'
+        'export PATH="$HOME/.cargo/bin:$PATH" && uv run reflex export --backend-only --no-zip'
     ]
     # export the backend
 
@@ -51,5 +51,5 @@ providers = ['python']
 
 # start phase
 [start]
-    cmd = 'REFLEX_ACCESS_TOKEN="${REFLEX_CLOUD_TOKEN}" REFLEX_SHOW_BUILT_WITH_REFLEX=0 FRONTEND_DEPLOY_URL="${FRONTEND_DEPLOY_URL}" uv run reflex run --backend-only --env ${REFLEX_ENV_MODE:-prod} && caddy run 2>&1'
+    cmd = 'export PATH="$HOME/.cargo/bin:$PATH" && REFLEX_ACCESS_TOKEN="${REFLEX_CLOUD_TOKEN}" REFLEX_SHOW_BUILT_WITH_REFLEX=0 FRONTEND_DEPLOY_URL="${FRONTEND_DEPLOY_URL}" uv run reflex run --backend-only --env ${REFLEX_ENV_MODE:-prod} && caddy run 2>&1'
     # run the backend and caddy in parallel, this will fail fast if either service crashes allowing railway to restart the deployment

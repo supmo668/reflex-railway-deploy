@@ -3,14 +3,10 @@
 # 
 # This script intelligently handles both initial deployments and subsequent redeployments:
 # - For new projects: Creates PostgreSQL, frontend, and backend services, configures variables, runs migrations
-# - For existing projects: Runs migrations and redeploys services with fresh configs
-header "Railway Deployment for $APP_NAME"
-echo "Project: $RAILWAY_PROJECT"
-echo "Team: $RAILWAY_TEAM"
-echo "Environment: $RAILWAY_ENVIRONMENT"
-echo "Frontend: $FRONTEND_NAME | Backend: $BACKEND_NAME"
+# - For existing projects: Runs migrations and deploys services with fresh configs
 # - Always copies fresh Caddyfile and nixpacks.toml files before deployment
 # - Automatically detects which services exist to minimize unnecessary operations
+# - Uses 'railway up' for all deployments except frontend redeploy after FRONTEND_DEPLOY_URL update
 
 set -e
 
@@ -379,7 +375,7 @@ setup_services() {
         sleep 10
     fi
     
-    # Sync variables to Railway services and redeploy newly created services
+    # Sync variables to Railway services and deploy newly created services
     if [ -f "$DEPLOY_DIR/set_railway_vars.sh" ]; then
         chmod +x "$DEPLOY_DIR/set_railway_vars.sh"
         
@@ -424,11 +420,11 @@ setup_services() {
                 fi
             fi
             
-            # Redeploy if this service was newly created
+            # Deploy if this service was newly created
             if [[ " ${services_to_redeploy[@]} " =~ " ${service} " ]]; then
-                log "Redeploying $service with updated environment variables..."
-                railway redeploy -s "$service" || warn "Failed to redeploy $service"
-                success "$service redeployed with correct variables"
+                log "Deploying $service with updated environment variables..."
+                railway up -s "$service" || warn "Failed to deploy $service"
+                success "$service deployed with correct variables"
             fi
         done
     else
@@ -461,7 +457,7 @@ deploy_service() {
     
     # Deploy the service
     if [ "$service_exists_flag" = true ]; then
-        log "Service already exists, using redeploy..."
+        log "Service already exists, using up for deployment..."
         
         # For existing services, sync variables from .env excluding Railway service-derived ones
         if [ -f "$DEPLOY_DIR/set_railway_vars.sh" ]; then
@@ -506,10 +502,10 @@ deploy_service() {
                 fi
             fi
         else
-            warn "set_railway_vars.sh not found, skipping variable sync for redeploy"
+            warn "set_railway_vars.sh not found, skipping variable sync for deployment"
         fi
         
-        railway redeploy -s "$service_name" || error "Failed to redeploy $service_name"
+        railway up || error "Failed to deploy $service_name"
     else
         log "New service, using up..."
         railway up || error "Failed to deploy $service_name"
@@ -548,26 +544,26 @@ update_deployment_urls() {
     
     # Update environment variables only if services were newly created
     if [ "$SERVICES_NEED_INIT" = true ]; then
-        # If RAILWAY_PUBLIC_DOMAIN variables weren't available, redeploy services to make them available
+        # If RAILWAY_PUBLIC_DOMAIN variables weren't available, deploy services to make them available
         need_redeploy=false
         if [ -z "$(railway variables --service "$BACKEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null)" ]; then
-            log "RAILWAY_PUBLIC_DOMAIN not available for backend, triggering redeploy..."
-            railway redeploy --service "$BACKEND_NAME" || warn "Failed to redeploy backend service"
+            log "RAILWAY_PUBLIC_DOMAIN not available for backend, triggering deployment..."
+            railway up --service "$BACKEND_NAME" || warn "Failed to deploy backend service"
             need_redeploy=true
         fi
         
         if [ -z "$(railway variables --service "$FRONTEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null)" ]; then
-            log "RAILWAY_PUBLIC_DOMAIN not available for frontend, triggering redeploy..."
-            railway redeploy --service "$FRONTEND_NAME" || warn "Failed to redeploy frontend service"
+            log "RAILWAY_PUBLIC_DOMAIN not available for frontend, triggering deployment..."
+            railway up --service "$FRONTEND_NAME" || warn "Failed to deploy frontend service"
             need_redeploy=true
         fi
         
-        # Wait for redeployment if needed
+        # Wait for deployment if needed
         if [ "$need_redeploy" = true ]; then
-            log "Waiting for services to redeploy and RAILWAY_PUBLIC_DOMAIN to be available..."
+            log "Waiting for services to deploy and RAILWAY_PUBLIC_DOMAIN to be available..."
             sleep 30
             
-            # Get the domains again after redeploy
+            # Get the domains again after deployment
             BACKEND_DOMAIN=$(railway variables --service "$BACKEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
             FRONTEND_DOMAIN=$(railway variables --service "$FRONTEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
         fi
@@ -635,9 +631,10 @@ deploy_all() {
         deploy_service "$FRONTEND_NAME" "frontend"
         
         # Ask user if they want to update FRONTEND_DEPLOY_URL and redeploy frontend
-        echo -e "${YELLOW}[QUESTION]${NC} Do you want to update FRONTEND_DEPLOY_URL with the frontend's RAILWAY_PUBLIC_DOMAIN and redeploy? (y/N)"
+        echo -e "${YELLOW}[QUESTION]${NC} Do you want to update FRONTEND_DEPLOY_URL with the frontend's RAILWAY_PUBLIC_DOMAIN and redeploy? (Y/n)"
         read -r response
-        if [[ "$response" =~ ^[Yy]$ ]]; then
+        if [[ "$response" =~ ^[Nn]$ ]]; then
+            log "Skipping FRONTEND_DEPLOY_URL update"
             log "Getting frontend domain for FRONTEND_DEPLOY_URL"
             FRONTEND_DOMAIN=$(railway variables --service "$FRONTEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
             if [ -n "$FRONTEND_DOMAIN" ]; then
@@ -654,8 +651,6 @@ deploy_all() {
             else
                 warn "Frontend RAILWAY_PUBLIC_DOMAIN not available"
             fi
-        else
-            log "Skipping FRONTEND_DEPLOY_URL update"
         fi
     else
         # Existing services: Deploy normally but ensure URLs are correct
@@ -757,7 +752,9 @@ RAILWAY_TEAM=${RAILWAY_TEAM:-"personal"}
 
 # Show config and deploy
 header "Railway Deployment for $APP_NAME"
-echo "Project ID: $RAILWAY_PROJECT_ID"
+echo "Project: $RAILWAY_PROJECT"
+echo "Team: $RAILWAY_TEAM"
+echo "Environment: $RAILWAY_ENVIRONMENT"
 echo "Frontend: $FRONTEND_NAME | Backend: $BACKEND_NAME"
 
 # Main deployment flow
@@ -796,4 +793,4 @@ header "Deployment Complete"
 echo "✓ Frontend: https://$FRONTEND_DOMAIN"
 echo "✓ Backend: https://$BACKEND_DOMAIN" 
 echo "✓ PostgreSQL: Database running"
-echo "Commands used (FYI): railway list | railway status | railway add -s <name> -v [<variables>] | railway up | railway variables --service <name> | railway deploy"
+echo "Commands used (FYI): railway list | railway status | railway add -s <name> -v [<variables>] | railway up | railway variables --service <name> | railway redeploy (only for frontend FRONTEND_DEPLOY_URL update)"
