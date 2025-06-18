@@ -16,7 +16,7 @@ providers = ['python']
 # install dependencies using uv and pyproject.toml
 [phases.install]
     dependsOn = ['uv-install']
-    cmds = ['uv sync --frozen']
+    cmds = ['uv sync']
 
 # default setup phase
 [phases.setup]

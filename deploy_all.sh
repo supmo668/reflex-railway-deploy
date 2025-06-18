@@ -612,8 +612,79 @@ update_deployment_urls() {
 # Deploy all services
 deploy_all() {
     log "Deploying services..."
-    deploy_service "$BACKEND_NAME" "backend"
-    deploy_service "$FRONTEND_NAME" "frontend"
+    
+    if [ "$SERVICES_NEED_INIT" = true ]; then
+        # First-time deployment: Deploy backend first, then frontend with pauses
+        log "First-time deployment: deploying backend first to generate RAILWAY_PUBLIC_DOMAIN"
+        deploy_service "$BACKEND_NAME" "backend"
+        
+        # Pause to allow backend to be ready and RAILWAY_PUBLIC_DOMAIN to be available
+        pause_for_verification "Backend deployed. Ready to deploy frontend service with REFLEX_API_URL from backend."
+        
+        # Update REFLEX_API_URL for frontend before deploying
+        log "Getting backend domain for REFLEX_API_URL before frontend deployment"
+        BACKEND_DOMAIN=$(railway variables --service "$BACKEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
+        if [ -n "$BACKEND_DOMAIN" ]; then
+            REFLEX_API_URL="https://$BACKEND_DOMAIN"
+            railway variables --service "$FRONTEND_NAME" --set "REFLEX_API_URL=$REFLEX_API_URL" >/dev/null 2>&1 || warn "Failed to set REFLEX_API_URL on frontend"
+            log "✓ REFLEX_API_URL set for frontend: $REFLEX_API_URL"
+        else
+            warn "Backend RAILWAY_PUBLIC_DOMAIN not available yet"
+        fi
+        
+        deploy_service "$FRONTEND_NAME" "frontend"
+        
+        # Ask user if they want to update FRONTEND_DEPLOY_URL and redeploy frontend
+        echo -e "${YELLOW}[QUESTION]${NC} Do you want to update FRONTEND_DEPLOY_URL with the frontend's RAILWAY_PUBLIC_DOMAIN and redeploy? (y/N)"
+        read -r response
+        if [[ "$response" =~ ^[Yy]$ ]]; then
+            log "Getting frontend domain for FRONTEND_DEPLOY_URL"
+            FRONTEND_DOMAIN=$(railway variables --service "$FRONTEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
+            if [ -n "$FRONTEND_DOMAIN" ]; then
+                FRONTEND_DEPLOY_URL="https://$FRONTEND_DOMAIN"
+                # Set FRONTEND_DEPLOY_URL on both services
+                railway variables --service "$BACKEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" >/dev/null 2>&1 || warn "Failed to set FRONTEND_DEPLOY_URL on backend"
+                railway variables --service "$FRONTEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" >/dev/null 2>&1 || warn "Failed to set FRONTEND_DEPLOY_URL on frontend"
+                log "✓ FRONTEND_DEPLOY_URL set: $FRONTEND_DEPLOY_URL"
+                
+                # Redeploy frontend with updated FRONTEND_DEPLOY_URL
+                log "Redeploying frontend with updated FRONTEND_DEPLOY_URL..."
+                railway redeploy -s "$FRONTEND_NAME" || warn "Failed to redeploy frontend"
+                success "Frontend redeployed with updated FRONTEND_DEPLOY_URL"
+            else
+                warn "Frontend RAILWAY_PUBLIC_DOMAIN not available"
+            fi
+        else
+            log "Skipping FRONTEND_DEPLOY_URL update"
+        fi
+    else
+        # Existing services: Deploy normally but ensure URLs are correct
+        log "Existing services deployment: ensuring URLs are up to date"
+        
+        # Get current domains
+        BACKEND_DOMAIN=$(railway variables --service "$BACKEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
+        FRONTEND_DOMAIN=$(railway variables --service "$FRONTEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
+        
+        # Ensure REFLEX_API_URL is set correctly for frontend
+        if [ -n "$BACKEND_DOMAIN" ]; then
+            REFLEX_API_URL="https://$BACKEND_DOMAIN"
+            railway variables --service "$FRONTEND_NAME" --set "REFLEX_API_URL=$REFLEX_API_URL" >/dev/null 2>&1 || warn "Failed to set REFLEX_API_URL on frontend"
+            log "✓ REFLEX_API_URL ensured for frontend: $REFLEX_API_URL"
+        fi
+        
+        # Ensure FRONTEND_DEPLOY_URL is set correctly for both services
+        if [ -n "$FRONTEND_DOMAIN" ]; then
+            FRONTEND_DEPLOY_URL="https://$FRONTEND_DOMAIN"
+            railway variables --service "$BACKEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" >/dev/null 2>&1 || warn "Failed to set FRONTEND_DEPLOY_URL on backend"
+            railway variables --service "$FRONTEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" >/dev/null 2>&1 || warn "Failed to set FRONTEND_DEPLOY_URL on frontend"
+            log "✓ FRONTEND_DEPLOY_URL ensured: $FRONTEND_DEPLOY_URL"
+        fi
+        
+        # Deploy services normally
+        deploy_service "$BACKEND_NAME" "backend"
+        deploy_service "$FRONTEND_NAME" "frontend"
+    fi
+    
     update_deployment_urls
     success "All services deployed"
 }
