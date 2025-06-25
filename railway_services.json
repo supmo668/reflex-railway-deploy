@@ -86,12 +86,6 @@
             "id": "57e3c195-7a1a-493e-a0d8-5d0764a69b8f",
             "name": "test"
           }
-        },
-        {
-          "node": {
-            "id": "5d39ba48-e102-4348-970e-3fcffd9ba259",
-            "name": "production"
-          }
         }
       ]
     },
@@ -106,11 +100,6 @@
                 {
                   "node": {
                     "environmentId": "57e3c195-7a1a-493e-a0d8-5d0764a69b8f"
-                  }
-                },
-                {
-                  "node": {
-                    "environmentId": "5d39ba48-e102-4348-970e-3fcffd9ba259"
                   }
                 }
               ]
@@ -141,11 +130,6 @@
                 {
                   "node": {
                     "environmentId": "57e3c195-7a1a-493e-a0d8-5d0764a69b8f"
-                  }
-                },
-                {
-                  "node": {
-                    "environmentId": "5d39ba48-e102-4348-970e-3fcffd9ba259"
                   }
                 }
               ]
