@@ -11,12 +11,16 @@
 set -e
 
 # Colors and logging
-RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[1;33m' BLUE='\033[0;34m' NC='\033[0m'
-log() { echo -e "${BLUE}[INFO]${NC} $1"; }
-success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
-warn() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
-error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
-header() { echo -e "${BLUE}================ $1 ================${NC}"; }
+if [ -t 1 ]; then
+    RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[1;33m' BLUE='\033[0;34m' NC='\033[0m'
+else
+    RED='' GREEN='' YELLOW='' BLUE='' NC=''
+fi
+log() { echo "[INFO] $1"; }
+success() { echo "[SUCCESS] $1"; }
+warn() { echo "[WARNING] $1"; }
+error() { echo "[ERROR] $1"; exit 1; }
+header() { echo "================ $1 ================"; }
 
 # Interactive pause function
 pause_for_verification() {
@@ -36,14 +40,19 @@ validate_env() {
 # Initialize Railway project
 init_project() {
     if ! railway status &> /dev/null; then
-        log "Creating Railway project..."
-        railway init || error "Failed to initialize Railway project"
+        log "Linking to Railway project: $RAILWAY_PROJECT"
+        railway link -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" -t "$RAILWAY_TEAM" || error "Failed to link to Railway project"
     fi
     success "Railway project ready"
 }
 
 # Deploy PostgreSQL
 deploy_postgres() {
+    if [ "$SKIP_DB" = true ]; then
+        success "Skipping PostgreSQL deployment (--skip-db enabled)"
+        return 0
+    fi
+    
     if [ "$POSTGRES_NEED_INIT" = false ]; then
         success "PostgreSQL already exists, skipping"
         return 0
@@ -72,33 +81,34 @@ build_env_vars() {
     local service_type=$1
     local env_vars=""
     
-    # Core variables that both services need
-    if [ -n "$REFLEX_DB_URL" ]; then
-        env_vars="${env_vars} -v REFLEX_DB_URL=\"$REFLEX_DB_URL\""
+    # When using --skip-db, don't try to use REFLEX_DB_URL from Railway PostgreSQL
+    # It will be set later via variable sync from .env file
+    if [ "$SKIP_DB" = false ]; then
+        # Core variables that both services need
+        if [ -n "$REFLEX_DB_URL" ]; then
+            env_vars="${env_vars} --variables \"REFLEX_DB_URL=$REFLEX_DB_URL\""
+        fi
     fi
     
-    # Add essential variables from .env file if they exist
+    # Add ALL variables from .env file (user requested to use all available)
     if [ -f "$ENV_FILE" ]; then
         while IFS='=' read -r key value; do
             # Skip comments and empty lines
             [[ $key =~ ^[[:space:]]*# ]] && continue
             [[ -z "$key" ]] && continue
             
-            # Add important variables that are typically available
-            case $key in
-                REFLEX_ACCESS_TOKEN|REFLEX_CLOUD_TOKEN|REFLEX_ENV_MODE|REFLEX_SHOW_BUILT_WITH_REFLEX)
-                    # Remove quotes if present and add to env_vars
-                    clean_value=$(echo "$value" | sed 's/^["'\'']*//;s/["'\'']*$//')
-                    env_vars="${env_vars} -v ${key}=\"${clean_value}\""
-                    ;;
-            esac
+            # Remove quotes if present and add to env_vars
+            clean_value=$(echo "$value" | sed 's/^["'\'']*//;s/["'\'']*$//')
+            if [ -n "$clean_value" ]; then
+                env_vars="${env_vars} --variables \"${key}=${clean_value}\""
+            fi
         done < "$ENV_FILE"
     fi
     
-    # Note: FRONTEND_DEPLOY_URL and REFLEX_API_URL will be set later via update_deployment_urls
-    # since they depend on the services being created first
+    # Clean up any leading/trailing spaces
+    env_vars=$(echo "$env_vars" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     
-    log "Environment variables for $service_type: ${env_vars#* }"  # Remove leading space
+    # Return the env_vars string without any log output
     echo "$env_vars"
 }
 
@@ -108,25 +118,37 @@ setup_vars() {
     BACKEND_NAME=${BACKEND_NAME:-"backend"}
     FRONTEND_NAME=${FRONTEND_NAME:-"frontend"}
     
-    # Always get database URLs from PostgreSQL service
-    log "Getting database URLs from PostgreSQL service..."
-    DATABASE_URL=$(railway variables --service "Postgres" --json 2>/dev/null | jq -r '.DATABASE_URL // empty' 2>/dev/null || echo "")
-    DATABASE_PUBLIC_URL=$(railway variables --service "Postgres" --json 2>/dev/null | jq -r '.DATABASE_PUBLIC_URL // empty' 2>/dev/null || echo "")
-    
-    if [ -n "$DATABASE_URL" ]; then
-        export REFLEX_DB_URL="$DATABASE_URL"
-        update_env "REFLEX_DB_URL" "$REFLEX_DB_URL" "$ENV_FILE"
-        log "Database URL configured: $REFLEX_DB_URL"
+    # Handle database URL configuration
+    if [ "$SKIP_DB" = true ]; then
+        # Use REFLEX_DB_URL from .env file when --skip-db is enabled
+        log "Using database URL from .env file (--skip-db enabled)"
+        if [ -n "$REFLEX_DB_URL" ]; then
+            export REFLEX_DB_URL
+            log "Database URL configured from .env: $REFLEX_DB_URL"
+        else
+            error "REFLEX_DB_URL not found in .env file. Required when using --skip-db option."
+        fi
     else
-        warn "DATABASE_URL not available yet, will be retrieved after PostgreSQL setup"
-    fi
-    
-    if [ -n "$DATABASE_PUBLIC_URL" ]; then
-        export DATABASE_PUBLIC_URL
-        update_env "DATABASE_PUBLIC_URL" "$DATABASE_PUBLIC_URL" "$ENV_FILE"
-        log "Public database URL configured for migrations"
-    else
-        warn "DATABASE_PUBLIC_URL not available yet, will be retrieved after PostgreSQL setup"
+        # Get database URLs from PostgreSQL service
+        log "Getting database URLs from PostgreSQL service..."
+        DATABASE_URL=$(railway variables --service "Postgres" --json 2>/dev/null | jq -r '.DATABASE_URL // empty' 2>/dev/null || echo "")
+        DATABASE_PUBLIC_URL=$(railway variables --service "Postgres" --json 2>/dev/null | jq -r '.DATABASE_PUBLIC_URL // empty' 2>/dev/null || echo "")
+        
+        if [ -n "$DATABASE_URL" ]; then
+            export REFLEX_DB_URL="$DATABASE_URL"
+            update_env "REFLEX_DB_URL" "$REFLEX_DB_URL" "$ENV_FILE"
+            log "Database URL configured: $REFLEX_DB_URL"
+        else
+            warn "DATABASE_URL not available yet, will be retrieved after PostgreSQL setup"
+        fi
+        
+        if [ -n "$DATABASE_PUBLIC_URL" ]; then
+            export DATABASE_PUBLIC_URL
+            update_env "DATABASE_PUBLIC_URL" "$DATABASE_PUBLIC_URL" "$ENV_FILE"
+            log "Public database URL configured for migrations"
+        else
+            warn "DATABASE_PUBLIC_URL not available yet, will be retrieved after PostgreSQL setup"
+        fi
     fi
     
     # Note: REFLEX_API_URL and FRONTEND_DEPLOY_URL will be set later in update_deployment_urls()
@@ -204,30 +226,27 @@ service_exists() {
         return 1  # Failed to get service list
     fi
     
-    # Parse the nested JSON structure to find services in the current environment
+    # Parse the nested JSON structure to find services in the current project and environment
     # Structure: [{"name": "project", "environments": {"edges": [{"node": {"id": "env_id", "name": "env_name"}}]}, "services": {"edges": [{"node": {"name": "service", "serviceInstances": {"edges": [{"node": {"environmentId": "env_id"}}]}}}]}}]
     
-    # Get all environment IDs for the target environment name across all projects
-    local env_ids=$(jq -r --arg env "$RAILWAY_ENVIRONMENT" '
-        .[] | .environments.edges[] | .node | select(.name == $env) | .id
+    # First, find the current project and get its environment ID for the target environment
+    local env_id=$(jq -r --arg project "$RAILWAY_PROJECT" --arg env "$RAILWAY_ENVIRONMENT" '
+        .[] | select(.name == $project) | .environments.edges[] | .node | select(.name == $env) | .id
     ' "$cache_file" 2>/dev/null)
     
-    # If no environment ID found, service doesn't exist
-    if [ -z "$env_ids" ]; then
+    # If no environment ID found for this project, service doesn't exist
+    if [ -z "$env_id" ]; then
         return 1
     fi
     
-    # Check each environment ID for the service
-    for env_id in $env_ids; do
-        # Check if the service exists and has an instance in this environment
-        if jq -e --arg service "$service_name" --arg env_id "$env_id" '
-            .[] | .services.edges[] | .node |
-            select(.name == $service) |
-            select(.serviceInstances.edges[] | .node | .environmentId == $env_id)
-        ' "$cache_file" >/dev/null 2>&1; then
-            return 0
-        fi
-    done
+    # Check if the service exists in the current project and has an instance in this environment
+    if jq -e --arg project "$RAILWAY_PROJECT" --arg service "$service_name" --arg env_id "$env_id" '
+        .[] | select(.name == $project) | .services.edges[] | .node |
+        select(.name == $service) |
+        select(.serviceInstances.edges[] | .node | .environmentId == $env_id)
+    ' "$cache_file" >/dev/null 2>&1; then
+        return 0
+    fi
     
     return 1
 }
@@ -251,7 +270,10 @@ check_services_status() {
 
     # Check if services exist
     POSTGRES_SERVICE_NAME="Postgres"
-    if service_exists "$POSTGRES_SERVICE_NAME"; then
+    if [ "$SKIP_DB" = true ]; then
+        POSTGRES_EXISTS=true
+        log "Skipping PostgreSQL check (--skip-db enabled), using REFLEX_DB_URL from .env"
+    elif service_exists "$POSTGRES_SERVICE_NAME"; then
         POSTGRES_EXISTS=true
         success "PostgreSQL service $POSTGRES_SERVICE_NAME already exists"
     else
@@ -311,7 +333,7 @@ setup_services() {
     # Create PostgreSQL first if needed (this will establish Railway link)
     if [ "$POSTGRES_NEED_INIT" = true ]; then
         log "Adding PostgreSQL service..."
-        railway add -d postgres -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" -t "$RAILWAY_TEAM" || error "Failed to add PostgreSQL service"
+        railway add -d postgres || error "Failed to add PostgreSQL service"
         first_service_created=true
         sleep 15
         log "PostgreSQL service created and project linked"
@@ -333,16 +355,38 @@ setup_services() {
             # Build environment variables string
             local env_vars=$(build_env_vars "$service_type")
             
+            # Log environment variables info (now outside the function)
+            if [ -n "$env_vars" ]; then
+                log "Environment variables for $service_type: $env_vars"
+            else
+                log "No environment variables configured for $service_type"
+            fi
+            
+            # Debug output
+            log "Debug: service='$service', service_type='$service_type'"
+            
             if [ "$first_service_created" = false ]; then
                 # First service creation with Railway linking
-                log "Creating $service with environment variables..."
-                eval "railway add --service \"$service\" -p \"$RAILWAY_PROJECT\" -e \"$RAILWAY_ENVIRONMENT\" -t \"$RAILWAY_TEAM\" $env_vars" || error "Failed to create $service service"
+                log "Creating $service..."
+                if [ -n "$env_vars" ]; then
+                    log "Debug: Running: railway add -s '$service' $env_vars"
+                    eval "railway add -s \"$service\" $env_vars" || error "Failed to create $service service"
+                else
+                    log "Debug: Running: railway add -s '$service'"
+                    railway add -s "$service" || error "Failed to create $service service"
+                fi
                 first_service_created=true
                 log "$service service created and project linked"
             else
                 # Subsequent services (already linked)
-                log "Creating $service with environment variables..."
-                eval "railway add --service \"$service\" $env_vars" || error "Failed to create $service service"
+                log "Creating $service..."
+                if [ -n "$env_vars" ]; then
+                    log "Debug: Running: railway add -s '$service' $env_vars"
+                    eval "railway add -s \"$service\" $env_vars" || error "Failed to create $service service"
+                else
+                    log "Debug: Running: railway add -s '$service'"
+                    railway add -s "$service" || error "Failed to create $service service"
+                fi
                 log "$service service created"
             fi
             services_to_redeploy+=("$service")
@@ -440,7 +484,7 @@ deploy_service() {
     
     log "Deploying $service_type: $service_name"
     
-    # Copy config files
+    # Copy config files from deployment directory to current application directory
     cp "$DEPLOY_DIR/Caddyfile.$service_type" Caddyfile || error "Caddyfile.$service_type not found"
     cp "$DEPLOY_DIR/nixpacks.$service_type.toml" nixpacks.toml || error "nixpacks.$service_type.toml not found"
     
@@ -685,7 +729,7 @@ deploy_all() {
 }
 
 # Main execution
-ENV_FILE=".env" DEPLOY_DIR="reflex-railway-deploy" FORCE_INIT=false
+ENV_FILE=".env" DEPLOY_DIR="reflex-railway-deploy" FORCE_INIT=false SKIP_DB=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -706,11 +750,13 @@ while [[ $# -gt 0 ]]; do
             echo "  -f, --file FILE           Environment file to use (default: .env)"
             echo "  -d, --deploy-dir DIR      Deploy directory (default: reflex-railway-deploy)"
             echo "      --force-init          Force re-initialization even if services exist"
+            echo "      --skip-db             Skip PostgreSQL initialization, use REFLEX_DB_URL from .env"
             echo ""
             echo "Examples:"
             echo "  $0 -p my-project                              # Use default service names"
             echo "  $0 -p my-project api web                      # Custom service names"
             echo "  $0 -p my-project backend frontend -t my-team  # With team"
+            echo "  $0 -p my-project --skip-db                    # Skip PostgreSQL, use .env REFLEX_DB_URL"
             exit 0 ;;
         -p|--project) RAILWAY_PROJECT="$2"; shift 2 ;;
         -t|--team) RAILWAY_TEAM="$2"; shift 2 ;;
@@ -718,6 +764,7 @@ while [[ $# -gt 0 ]]; do
         -f|--file) ENV_FILE="$2"; shift 2 ;;
         -d|--deploy-dir) DEPLOY_DIR="$2"; shift 2 ;;
         --force-init) FORCE_INIT=true; shift ;;
+        --skip-db) SKIP_DB=true; shift ;;
         -*) error "Unknown option: $1" ;;
         *) 
             # Handle positional arguments
@@ -748,7 +795,7 @@ APP_NAME=${REFLEX_APP_NAME:-$(basename "$PWD")}
 BACKEND_NAME=${BACKEND_NAME_ARG:-${BACKEND_NAME:-"backend"}}
 FRONTEND_NAME=${FRONTEND_NAME_ARG:-${FRONTEND_NAME:-"frontend"}}
 RAILWAY_ENVIRONMENT=${RAILWAY_ENVIRONMENT:-"production"}
-RAILWAY_TEAM=${RAILWAY_TEAM:-"personal"}
+RAILWAY_TEAM=${RAILWAY_TEAM:-"prototype"}
 
 # Show config and deploy
 header "Railway Deployment for $APP_NAME"

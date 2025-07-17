@@ -126,8 +126,8 @@ To create a new Railway project:
 # Initialize a new Railway project in the current directory
 railway init
 
-# Follow the interactive prompts to create a new project
-# This will create a new project in your Railway account
+# Follow the interactive prompts to create a new project to create a new project in your Railway account
+
 ```
 
 #### Add Services to Your Project
@@ -301,11 +301,13 @@ chmod +x deploy_all.sh
 
 **Script Options:**
 - `--help`: Show help message with all options
-- `--no-postgres`: Skip PostgreSQL deployment
-- `--postgres`: Enable PostgreSQL deployment (default)
-- `-f, --file`: Specify custom environment file (default: .env)
-- `-v, --verbose`: Enable verbose output
-- `-d, --deploy-dir`: Specify deployment directory (default: reflex-railway-deploy)
+- `--skip-db`: Skip PostgreSQL initialization and use `REFLEX_DB_URL` from .env file
+- `--force-init`: Force re-initialization even if services exist
+- `-p, --project PROJECT`: Railway project ID or name (required)
+- `-t, --team TEAM`: Railway team (default: personal)
+- `-e, --environment ENV`: Railway environment (default: production)
+- `-f, --file FILE`: Environment file to use (default: .env)
+- `-d, --deploy-dir DIR`: Deploy directory (default: reflex-railway-deploy)
 
 ### Manual Deployment Steps
 
@@ -524,6 +526,16 @@ The deployment script accepts configuration through command line arguments and o
 ```bash
 ./reflex-railway-deploy/deploy_all.sh -p my-project --force-init
 ```
+
+### Skip PostgreSQL initialization (use external database):
+```bash
+./reflex-railway-deploy/deploy_all.sh -p my-project --skip-db
+```
+
+**Note**: When using `--skip-db`, ensure your `.env` file contains a valid `REFLEX_DB_URL` pointing to your external database. This option is useful when:
+- You want to use an external database service (e.g., Supabase, PlanetScale)
+- You already have a PostgreSQL instance running elsewhere
+- You're connecting to a shared database across multiple projects
 
 ## Troubleshooting
 
