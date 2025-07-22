@@ -8,33 +8,58 @@ providers = ['python']
     NPM_CONFIG_UPDATE_NOTIFIER = 'false' # the update check is relatively useless in a production environment
     NPM_CONFIG_FUND = 'false' # the fund notification is also relatively useless in a production environment
     PIP_DISABLE_PIP_VERSION_CHECK = '1' # the update check is relatively useless in a production environment
+    # Environment variables for C++ runtime libraries
+    LD_LIBRARY_PATH = '/nix/store/*/lib:/usr/lib:/lib'
+    CC = 'gcc'
+    CXX = 'g++'
 
 # default setup phase
 [phases.setup]
-    nixPkgs = ['...', 'unzip', 'parallel', 'curl'] # install unzip because reflex needs it, parallel for running services, and curl for downloading uv
-    nixLibs = ['zlib']
+    nixPkgs = ['...', 'unzip', 'parallel', 'curl', 'gcc', 'stdenv.cc.cc'] # essential packages for pymilvus/ujson
+    nixLibs = ['zlib', 'stdenv.cc.cc.lib']
 
-# install uv package manager
+# install uv package manager using pip
 [phases.uv-install]
     dependsOn = ['setup']
-    cmds = ['curl -LsSf https://astral.sh/uv/install.sh | sh && echo "export PATH=\"$HOME/.cargo/bin:$PATH\"" >> ~/.bashrc']
+    cmds = [
+        'pip install uv',
+        'which uv'
+    ]
+
+# setup library paths for C++ runtime
+[phases.lib-setup]
+    dependsOn = ['uv-install']
+    cmds = [
+        'echo "Setting up C++ runtime libraries..."',
+        'find /nix/store -name "libstdc++.so*" 2>/dev/null | head -5',
+        'find /nix/store -name "libgcc_s.so*" 2>/dev/null | head -5',
+        'export LD_LIBRARY_PATH="/nix/store/*/lib:$LD_LIBRARY_PATH"',
+        'echo "export LD_LIBRARY_PATH=/nix/store/*/lib:$LD_LIBRARY_PATH" >> ~/.bashrc'
+    ]
 
 # install dependencies using uv and pyproject.toml
 [phases.install]
-    dependsOn = ['uv-install']
-    cmds = ['export PATH="$HOME/.cargo/bin:$PATH" && uv sync']
+    dependsOn = ['lib-setup']
+    cmds = [
+        'source ~/.bashrc',
+        'uv sync'
+    ]
 
 # reflex init phase
 [phases.init]
     dependsOn = ['install'] # run after install
-    cmds = ['export PATH="$HOME/.cargo/bin:$PATH" && uv run reflex init'] # re-initialize the app with the latest template using uv
+    cmds = [
+        'source ~/.bashrc',
+        'uv run reflex init'
+    ] # re-initialize the app with the latest template using uv
 
 # export backend phase
 [phases.export]
     dependsOn = ['init'] # run after init
     cmds = [
+        'source ~/.bashrc',
         'FRONTEND_DEPLOY_URL="${FRONTEND_DEPLOY_URL}"',
-        'export PATH="$HOME/.cargo/bin:$PATH" && uv run reflex export --backend-only --no-zip'
+        'uv run reflex export --backend-only --no-zip'
     ]
     # export the backend
 
@@ -51,5 +76,5 @@ providers = ['python']
 
 # start phase
 [start]
-    cmd = 'export PATH="$HOME/.cargo/bin:$PATH" && REFLEX_ACCESS_TOKEN="${REFLEX_CLOUD_TOKEN}" REFLEX_SHOW_BUILT_WITH_REFLEX=0 FRONTEND_DEPLOY_URL="${FRONTEND_DEPLOY_URL}" uv run reflex run --backend-only --env ${REFLEX_ENV_MODE:-prod} && caddy run 2>&1'
+    cmd = 'source ~/.bashrc && REFLEX_ACCESS_TOKEN="${REFLEX_CLOUD_TOKEN}" REFLEX_SHOW_BUILT_WITH_REFLEX=0 FRONTEND_DEPLOY_URL="${FRONTEND_DEPLOY_URL}" uv run reflex run --backend-only --env ${REFLEX_ENV_MODE:-prod} && caddy run 2>&1'
     # run the backend and caddy in parallel, this will fail fast if either service crashes allowing railway to restart the deployment
