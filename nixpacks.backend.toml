@@ -12,11 +12,17 @@ providers = ['python']
     LD_LIBRARY_PATH = '/nix/store/*/lib:/usr/lib:/lib'
     CC = 'gcc'
     CXX = 'g++'
+    # PostgreSQL configuration
+    PG_CONFIG = '/nix/store/*/bin/pg_config'
+    PGCONFIG = '/nix/store/*/bin/pg_config'
+    # Backend-only deployment configuration
+    REFLEX_BACKEND_ONLY = 'true'
+    NODE_ENV = 'production'
 
 # default setup phase
 [phases.setup]
-    nixPkgs = ['...', 'unzip', 'parallel', 'curl', 'gcc', 'stdenv.cc.cc'] # essential packages for pymilvus/ujson
-    nixLibs = ['zlib', 'stdenv.cc.cc.lib']
+    nixPkgs = ['...', 'unzip', 'parallel', 'curl', 'gcc', 'stdenv.cc.cc', 'postgresql', 'libpq'] # essential packages for pymilvus/ujson and PostgreSQL
+    nixLibs = ['zlib', 'stdenv.cc.cc.lib', 'postgresql.lib']
 
 # install uv package manager using pip
 [phases.uv-install]
@@ -26,20 +32,33 @@ providers = ['python']
         'which uv'
     ]
 
-# setup library paths for C++ runtime
+# setup library paths for C++ runtime and PostgreSQL
 [phases.lib-setup]
     dependsOn = ['uv-install']
     cmds = [
-        'echo "Setting up C++ runtime libraries..."',
+        'echo "Setting up C++ runtime and PostgreSQL libraries..."',
         'find /nix/store -name "libstdc++.so*" 2>/dev/null | head -5',
         'find /nix/store -name "libgcc_s.so*" 2>/dev/null | head -5',
+        'find /nix/store -name "libpq.so*" 2>/dev/null | head -5',
+        'find /nix/store -name "pg_config" 2>/dev/null | head -3',
         'export LD_LIBRARY_PATH="/nix/store/*/lib:$LD_LIBRARY_PATH"',
-        'echo "export LD_LIBRARY_PATH=/nix/store/*/lib:$LD_LIBRARY_PATH" >> ~/.bashrc'
+        'echo "export LD_LIBRARY_PATH=/nix/store/*/lib:$LD_LIBRARY_PATH" >> ~/.bashrc',
+        'echo "export PG_CONFIG=$(find /nix/store -name pg_config 2>/dev/null | head -1)" >> ~/.bashrc'
+    ]
+
+# cleanup phase - remove node.js dependencies for backend-only deployment
+[phases.cleanup]
+    dependsOn = ['lib-setup']
+    cmds = [
+        'echo "Cleaning up Node.js dependencies for backend-only deployment..."',
+        'rm -rf node_modules/ || true',
+        'rm -f package*.json || true',
+        'which node && echo "Warning: Node.js still present" || echo "Node.js not found (good for backend-only)"'
     ]
 
 # install dependencies using uv and pyproject.toml
 [phases.install]
-    dependsOn = ['lib-setup']
+    dependsOn = ['cleanup']
     cmds = [
         'source ~/.bashrc',
         'uv sync'
