@@ -3,7 +3,7 @@
     "id": "6f1a2867-4f3f-4787-bc15-3235a93dddc6",
     "name": "syntropy",
     "createdAt": "2025-07-16T18:03:16.786Z",
-    "updatedAt": "2025-07-22T09:14:58.035Z",
+    "updatedAt": "2025-07-24T19:54:15.362Z",
     "deletedAt": null,
     "team": {
       "id": "714aad0b-05f9-4bcc-930a-1726b42a078c",
@@ -29,7 +29,7 @@
       "edges": [
         {
           "node": {
-            "id": "492dcc72-81fc-49aa-9c63-279abe0484c1",
+            "id": "0c9f92ec-7b92-4bed-ba18-859fbc9fd58e",
             "name": "syntropy-portal",
             "serviceInstances": {
               "edges": [
@@ -44,7 +44,7 @@
         },
         {
           "node": {
-            "id": "e454a27e-64db-44b2-b0d0-ad77158ec6a3",
+            "id": "21842914-fb8d-4180-a32c-281bdfe7e107",
             "name": "syntropy-api",
             "serviceInstances": {
               "edges": [

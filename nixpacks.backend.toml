@@ -8,77 +8,33 @@ providers = ['python']
     NPM_CONFIG_UPDATE_NOTIFIER = 'false' # the update check is relatively useless in a production environment
     NPM_CONFIG_FUND = 'false' # the fund notification is also relatively useless in a production environment
     PIP_DISABLE_PIP_VERSION_CHECK = '1' # the update check is relatively useless in a production environment
-    # Environment variables for C++ runtime libraries
-    LD_LIBRARY_PATH = '/nix/store/*/lib:/usr/lib:/lib'
-    CC = 'gcc'
-    CXX = 'g++'
-    # PostgreSQL configuration
-    PG_CONFIG = '/nix/store/*/bin/pg_config'
-    PGCONFIG = '/nix/store/*/bin/pg_config'
-    # Backend-only deployment configuration
-    REFLEX_BACKEND_ONLY = 'true'
-    NODE_ENV = 'production'
 
 # default setup phase
 [phases.setup]
-    nixPkgs = ['...', 'unzip', 'parallel', 'curl', 'gcc', 'stdenv.cc.cc', 'postgresql', 'libpq'] # essential packages for pymilvus/ujson and PostgreSQL
-    nixLibs = ['zlib', 'stdenv.cc.cc.lib', 'postgresql.lib']
+    nixPkgs = ['...', 'unzip', 'parallel', 'curl', 'gcc'] # install unzip because reflex needs it, parallel for running services, curl for downloading uv, gcc for compilation
+    nixLibs = ['zlib', 'gcc-unwrapped.lib']
 
-# install uv package manager using pip
+# install uv package manager
 [phases.uv-install]
     dependsOn = ['setup']
-    cmds = [
-        'pip install uv',
-        'which uv'
-    ]
-
-# setup library paths for C++ runtime and PostgreSQL
-[phases.lib-setup]
-    dependsOn = ['uv-install']
-    cmds = [
-        'echo "Setting up C++ runtime and PostgreSQL libraries..."',
-        'find /nix/store -name "libstdc++.so*" 2>/dev/null | head -5',
-        'find /nix/store -name "libgcc_s.so*" 2>/dev/null | head -5',
-        'find /nix/store -name "libpq.so*" 2>/dev/null | head -5',
-        'find /nix/store -name "pg_config" 2>/dev/null | head -3',
-        'export LD_LIBRARY_PATH="/nix/store/*/lib:$LD_LIBRARY_PATH"',
-        'echo "export LD_LIBRARY_PATH=/nix/store/*/lib:$LD_LIBRARY_PATH" >> ~/.bashrc',
-        'echo "export PG_CONFIG=$(find /nix/store -name pg_config 2>/dev/null | head -1)" >> ~/.bashrc'
-    ]
-
-# cleanup phase - remove node.js dependencies for backend-only deployment
-[phases.cleanup]
-    dependsOn = ['lib-setup']
-    cmds = [
-        'echo "Cleaning up Node.js dependencies for backend-only deployment..."',
-        'rm -rf node_modules/ || true',
-        'rm -f package*.json || true',
-        'which node && echo "Warning: Node.js still present" || echo "Node.js not found (good for backend-only)"'
-    ]
+    cmds = ['curl -LsSf https://astral.sh/uv/install.sh | sh && echo "export PATH=\"$HOME/.cargo/bin:$PATH\"" >> ~/.bashrc']
 
 # install dependencies using uv and pyproject.toml
 [phases.install]
-    dependsOn = ['cleanup']
-    cmds = [
-        'source ~/.bashrc',
-        'uv sync'
-    ]
+    dependsOn = ['uv-install']
+    cmds = ['export PATH="$HOME/.cargo/bin:$PATH" && uv sync']
 
 # reflex init phase
 [phases.init]
     dependsOn = ['install'] # run after install
-    cmds = [
-        'source ~/.bashrc',
-        'uv run reflex init'
-    ] # re-initialize the app with the latest template using uv
+    cmds = ['export PATH="$HOME/.cargo/bin:$PATH" && uv run reflex init'] # re-initialize the app with the latest template using uv
 
 # export backend phase
 [phases.export]
     dependsOn = ['init'] # run after init
     cmds = [
-        'source ~/.bashrc',
         'FRONTEND_DEPLOY_URL="${FRONTEND_DEPLOY_URL}"',
-        'uv run reflex export --backend-only --no-zip'
+        'export PATH="$HOME/.cargo/bin:$PATH" && uv run reflex export --backend-only --no-zip'
     ]
     # export the backend
 
@@ -95,5 +51,5 @@ providers = ['python']
 
 # start phase
 [start]
-    cmd = 'source ~/.bashrc && REFLEX_ACCESS_TOKEN="${REFLEX_CLOUD_TOKEN}" REFLEX_SHOW_BUILT_WITH_REFLEX=0 FRONTEND_DEPLOY_URL="${FRONTEND_DEPLOY_URL}" uv run reflex run --backend-only --env ${REFLEX_ENV_MODE:-prod} && caddy run 2>&1'
+    cmd = 'export PATH="$HOME/.cargo/bin:$PATH" && export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/nix/store/*/lib" && REFLEX_ACCESS_TOKEN="${REFLEX_CLOUD_TOKEN}" REFLEX_SHOW_BUILT_WITH_REFLEX=0 FRONTEND_DEPLOY_URL="${FRONTEND_DEPLOY_URL}" uv run reflex run --backend-only --env ${REFLEX_ENV_MODE:-prod} --loglevel debug && caddy run 2>&1'
     # run the backend and caddy in parallel, this will fail fast if either service crashes allowing railway to restart the deployment

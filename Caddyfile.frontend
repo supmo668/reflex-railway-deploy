@@ -13,28 +13,37 @@
         format json
     }
 
-    # Serve static files
+    # Serve static files from the exported frontend directory
     root * .web/_static
-    file_server
-
-    reverse_proxy localhost:3000
-
-    # Proxy API requests to the backend
-    handle / {
-        reverse_proxy ${REFLEX_API_URL} {
-            header_up Host {host}
+    
+    # API and WebSocket routes should be proxied to backend
+    @api {
+        path /_event/*
+        path /api/*
+        path /_upload/*
+    }
+    
+    handle @api {
+        reverse_proxy {$REFLEX_API_URL} {
+            header_up Host {upstream_hostport}
             header_up X-Real-IP {remote_host}
             header_up X-Forwarded-For {remote_host}
             header_up X-Forwarded-Proto {scheme}
         }
     }
 
-    # Allow for pretty paths with fallback to index.html
-    try_files {path} {path}/ /index.html
+    # Serve the frontend application
+    handle {
+        try_files {path} {path}/ /index.html
+        file_server
+    }
 
-    # Rewrite any errors to the corresponding error page
+    # Error handling
     handle_errors {
-        rewrite * /{err.status_code}.html
+        @404 {
+            expression {http.error.status_code} == 404
+        }
+        rewrite @404 /404.html
         file_server
     }
 }

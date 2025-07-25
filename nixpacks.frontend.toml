@@ -8,17 +8,14 @@ providers = ['python']
     NPM_CONFIG_UPDATE_NOTIFIER = 'false' # the update check is relatively useless in a production environment
     NPM_CONFIG_FUND = 'false' # the fund notification is also relatively useless in a production environment
     PIP_DISABLE_PIP_VERSION_CHECK = '1' # the update check is relatively useless in a production environment
-    NIXPACKS_DEBIAN_PACKAGES = "libstdc++6,build-essential,gcc,g++,libc6-dev" # system dependencies for numpy/scientific libraries
-
-# system dependencies setup phase
-[phases.system]
-    aptPkgs = ['libstdc++6', 'build-essential', 'gcc', 'g++', 'libc6-dev']
+    # Add Node.js memory and process limits
+    NODE_OPTIONS = '--max-old-space-size=4096' # Increased to 4GB for build process
+    UV_THREADPOOL_SIZE = '2' # Reduced thread pool size to prevent resource exhaustion
 
 # default setup phase
 [phases.setup]
-    dependsOn = ['system']
-    nixPkgs = ['...', 'unzip', 'parallel', 'curl'] # install unzip because reflex needs it, parallel for running services, and curl for downloading uv
-    nixLibs = ['zlib']
+    nixPkgs = ['...', 'unzip', 'parallel', 'curl', 'gcc'] # install unzip because reflex needs it, parallel for running services, curl for downloading uv, gcc for compilation
+    nixLibs = ['zlib', 'gcc-unwrapped.lib']
 
 # install uv package manager
 [phases.uv-install]
@@ -33,17 +30,25 @@ providers = ['python']
 # reflex init phase
 [phases.init]
     dependsOn = ['install'] # run after install
-    cmds = ['export PATH="$HOME/.cargo/bin:$PATH" && uv run reflex init --loglevel debug'] # re-initialize the app with the latest template using uv
+    cmds = ['export PATH="$HOME/.cargo/bin:$PATH" && uv run reflex init'] # re-initialize the app with the latest template using uv
 
 # export frontend phase
 [phases.export]
     dependsOn = ['init'] # run after init
     cmds = [
-        'FRONTEND_DEPLOY_URL="${FRONTEND_DEPLOY_URL}"',
-        'REFLEX_API_URL="${REFLEX_API_URL}"',
-        'export PATH="$HOME/.cargo/bin:$PATH" && uv run reflex export --frontend-only --no-zip --loglevel debug'
+        # Set environment variables for export
+        'export FRONTEND_DEPLOY_URL="${FRONTEND_DEPLOY_URL}"',
+        'export REFLEX_API_URL="${REFLEX_API_URL}"',
+        # Set ulimits and memory constraints for the export process
+        'ulimit -n 8192',  # Increased file descriptor limit
+        'ulimit -u 512',   # Reduced process limit to prevent fork bombs
+        'ulimit -v 8388608',  # Set virtual memory limit to 8GB
+        'export NODE_OPTIONS="--max-old-space-size=4096"',
+        # Disable Next.js parallel compilation to reduce memory usage
+        'export NEXT_DISABLE_SWC_WASM=1',
+        'export PATH="$HOME/.cargo/bin:$PATH" && uv run reflex export --frontend-only --no-zip'
     ]
-    # export the frontend with debug logging
+    # export the frontend
 
 # install caddy phase
 [phases.caddy]
@@ -56,7 +61,7 @@ providers = ['python']
     dependsOn = ['caddy'] # run after caddy
     cmds = ['caddy fmt --overwrite'] # format the caddyfile and overwrite changes
 
-# start phase
+# start phase - Run both reflex and caddy
 [start]
-    cmd = 'export PATH="$HOME/.cargo/bin:$PATH" && REFLEX_ACCESS_TOKEN="${REFLEX_ACCESS_TOKEN}" REFLEX_SHOW_BUILT_WITH_REFLEX=0 FRONTEND_DEPLOY_URL="${FRONTEND_DEPLOY_URL}" REFLEX_API_URL="${REFLEX_API_URL}" uv run reflex run --frontend-only --env ${REFLEX_ENV_MODE:-prod} && caddy run 2>&1'
-    # run the frontend and caddy in parallel, this will fail fast if either service crashes allowing railway to restart the deployment
+    cmd = 'export PATH="$HOME/.cargo/bin:$PATH" && export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/nix/store/*/lib" && export NODE_OPTIONS="--max-old-space-size=4096" && ulimit -n 8192 && ulimit -u 512 && parallel -j 2 --lb ::: "REFLEX_ACCESS_TOKEN=\"${REFLEX_ACCESS_TOKEN}\" REFLEX_SHOW_BUILT_WITH_REFLEX=0 FRONTEND_DEPLOY_URL=\"${FRONTEND_DEPLOY_URL}\" REFLEX_API_URL=\"${REFLEX_API_URL}\" uv run reflex run --frontend-only --env ${REFLEX_ENV_MODE:-prod}" "caddy run"'
+    # run the frontend and caddy in parallel using GNU parallel
