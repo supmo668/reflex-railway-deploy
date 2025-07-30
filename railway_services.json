@@ -3,7 +3,7 @@
     "id": "6f1a2867-4f3f-4787-bc15-3235a93dddc6",
     "name": "syntropy",
     "createdAt": "2025-07-16T18:03:16.786Z",
-    "updatedAt": "2025-07-24T19:54:15.362Z",
+    "updatedAt": "2025-07-25T08:07:19.632Z",
     "deletedAt": null,
     "team": {
       "id": "714aad0b-05f9-4bcc-930a-1726b42a078c",
@@ -46,6 +46,21 @@
           "node": {
             "id": "21842914-fb8d-4180-a32c-281bdfe7e107",
             "name": "syntropy-api",
+            "serviceInstances": {
+              "edges": [
+                {
+                  "node": {
+                    "environmentId": "164a9416-0a44-4630-9dc7-060f868340e0"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "node": {
+            "id": "c670d06c-e5eb-4211-8a9a-61142b418374",
+            "name": "Postgres",
             "serviceInstances": {
               "edges": [
                 {

@@ -63,5 +63,5 @@ providers = ['python']
 
 # start phase - Run both reflex and caddy
 [start]
-    cmd = 'export PATH="$HOME/.cargo/bin:$PATH" && export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/nix/store/*/lib" && export NODE_OPTIONS="--max-old-space-size=4096" && ulimit -n 8192 && ulimit -u 512 && parallel -j 2 --lb ::: "REFLEX_ACCESS_TOKEN=\"${REFLEX_ACCESS_TOKEN}\" REFLEX_SHOW_BUILT_WITH_REFLEX=0 FRONTEND_DEPLOY_URL=\"${FRONTEND_DEPLOY_URL}\" REFLEX_API_URL=\"${REFLEX_API_URL}\" uv run reflex run --frontend-only --env ${REFLEX_ENV_MODE:-prod}" "caddy run"'
-    # run the frontend and caddy in parallel using GNU parallel
+    cmd = 'export PATH="$HOME/.cargo/bin:$PATH" && export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/nix/store/*/lib" && export NODE_OPTIONS="--max-old-space-size=4096" && ulimit -n 8192 && ulimit -u 512 && REFLEX_ACCESS_TOKEN="${REFLEX_ACCESS_TOKEN}" REFLEX_SHOW_BUILT_WITH_REFLEX=0 FRONTEND_DEPLOY_URL="${FRONTEND_DEPLOY_URL}" REFLEX_API_URL="${REFLEX_API_URL}" uv run reflex run --frontend-only --env ${REFLEX_ENV_MODE:-prod} && caddy run 2>&1'
+    # run the frontend and caddy in parallel, this will fail fast if either service crashes allowing railway to restart the deployment

@@ -1,7 +1,7 @@
-# Use Python 3.11 slim image as base
-FROM python:3.11-slim
+# Build stage
+FROM python:3.11-slim AS builder
 
-# Install system dependencies required for pymilvus, ujson, and PostgreSQL
+# Install all dependencies and set build-time memory limits
 RUN apt-get update && apt-get install -y \
     build-essential \
     libstdc++6 \
@@ -9,25 +9,75 @@ RUN apt-get update && apt-get install -y \
     g++ \
     libpq-dev \
     postgresql-client \
+    unzip \
+    parallel \
+    curl \
+    zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-RUN pip install uv
-
-# Set working directory
 WORKDIR /app
 
-# Copy pyproject.toml and uv.lock for better caching
+# Copy and install dependencies
 COPY pyproject.toml uv.lock* ./
+RUN pip install uv && uv sync --frozen
 
-# Install Python dependencies using uv
-RUN uv sync --frozen
+# Copy .env file explicitly (ignored by git)
+COPY .env* ./
 
-# Copy the rest of the application
+# Copy application
 COPY . .
 
-# Expose the port that Reflex runs on
-EXPOSE 8000
+# Debug: Verify assets directory and styles.css exist after copy
+RUN ls -la /app/ && ls -la /app/assets/ && ls -la /app/assets/styles.css
 
-# Command to run the application
-CMD ["uv", "run", "reflex", "run", "--env", "prod", "--backend-only"]
+# Add build-time environment variables for Clerk (required for Next.js SSR)
+ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+ARG CLERK_PUBLISHABLE_KEY
+ARG CLERK_SECRET_KEY
+ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+ENV CLERK_PUBLISHABLE_KEY=$CLERK_PUBLISHABLE_KEY
+ENV CLERK_SECRET_KEY=$CLERK_SECRET_KEY
+
+# Build with optimizations for backend-only (no Node.js needed)
+ENV REFLEX_BACKEND_ONLY=true
+
+# Initialize Reflex for backend-only mode
+RUN uv run reflex init
+
+# Runtime stage
+FROM python:3.11-slim
+
+# Install only runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libstdc++6 \
+    libpq-dev \
+    postgresql-client \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy built application from builder
+COPY --from=builder /app /app
+
+# Install uv for runtime
+RUN pip install uv
+
+# Runtime environment for backend-only
+ENV REFLEX_BACKEND_ONLY=true
+
+# Create simplified startup script for backend-only (relies on .env file for configuration)
+RUN echo '#!/bin/bash\n\
+set -e\n\
+ulimit -n 16384\n\
+ulimit -u 1024\n\
+# Export essential Reflex settings\n\
+export REFLEX_SHOW_BUILT_WITH_REFLEX=0\n\
+export REFLEX_ENV_MODE="${REFLEX_ENV_MODE:-prod}"\n\
+export REFLEX_BACKEND_ONLY=true\n\
+# Run reflex backend-only (config.py will load .env file automatically)\n\
+exec uv run reflex run --env ${REFLEX_ENV_MODE:-prod} --backend-only' > /app/start.sh && \
+    chmod +x /app/start.sh
+
+EXPOSE 8000
+CMD ["/app/start.sh"]
