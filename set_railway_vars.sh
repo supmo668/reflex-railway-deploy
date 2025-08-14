@@ -1,11 +1,11 @@
 #!/bin/bash
-# set_railway_vars.sh - Set Railway environment variables from .env file
+# set_railway_vars.sh - Set Railway environment variables from environment file
 # Usage: ./set_railway_vars.sh -s SERVICE [-f FILE] [-e EXCLUDE_VARS]
 
 # Remove set -e to continue processing all variables even if some fail
 
 # Defaults
-SERVICE="" ENV_FILE=".env" EXCLUDE_VARS=""
+SERVICE="" ENV_FILE="envs/prod" EXCLUDE_VARS=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do

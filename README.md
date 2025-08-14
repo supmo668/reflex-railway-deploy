@@ -25,11 +25,11 @@ These are automatically set by the deployment script:
 
 | Service | Variables Set Automatically |
 |---------|----------------------------|
-| **Backend** | `FRONTEND_DEPLOY_URL` (for CORS)<br>`REFLEX_DB_URL` (from Railway PostgreSQL)<br>+ all variables from .env |
-| **Frontend** | `FRONTEND_DEPLOY_URL` (self-reference)<br>`REFLEX_API_URL` (backend's Railway domain)<br>`REFLEX_DB_URL` (from Railway PostgreSQL)<br>+ all variables from .env |
+| **Backend** | `FRONTEND_DEPLOY_URL` (for CORS)<br>`REFLEX_DB_URL` (from Railway PostgreSQL)<br>+ all variables from envs/prod |
+| **Frontend** | `FRONTEND_DEPLOY_URL` (self-reference)<br>`REFLEX_API_URL` (backend's Railway domain)<br>`REFLEX_DB_URL` (from Railway PostgreSQL)<br>+ all variables from envs/prod |
 
 **Key Points:**
-- ✅ Put your app secrets in `.env` file
+- ✅ Put your app secrets in `envs/prod` file (default) or specify with `-f` option
 - ❌ **Never** manually set `REFLEX_API_URL`, `FRONTEND_DEPLOY_URL`, or `REFLEX_DB_URL`  
 - 🔄 Deployment script uses `railway domain` to get actual Railway domains
 - 🔗 Backend gets frontend URL for CORS, frontend gets backend URL for API calls
@@ -301,12 +301,12 @@ chmod +x deploy_all.sh
 
 **Script Options:**
 - `--help`: Show help message with all options
-- `--skip-db`: Skip PostgreSQL initialization and use `REFLEX_DB_URL` from .env file
+- `--skip-db`: Skip PostgreSQL initialization and use `REFLEX_DB_URL` from environment file
 - `--force-init`: Force re-initialization even if services exist
 - `-p, --project PROJECT`: Railway project ID or name (required)
 - `-t, --team TEAM`: Railway team (default: personal)
 - `-e, --environment ENV`: Railway environment (default: production)
-- `-f, --file FILE`: Environment file to use (default: .env)
+- `-f, --file FILE`: Environment file to use (default: envs/prod)
 - `-d, --deploy-dir DIR`: Deploy directory (default: reflex-railway-deploy)
 
 ### Manual Deployment Steps

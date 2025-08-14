@@ -4,7 +4,7 @@
 set -e
 
 # Defaults
-SERVICE="" ENV_FILE=".env" VERBOSE=false
+SERVICE="" ENV_FILE="envs/prod" VERBOSE=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
