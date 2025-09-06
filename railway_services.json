@@ -3,7 +3,7 @@
     "id": "6f1a2867-4f3f-4787-bc15-3235a93dddc6",
     "name": "syntropy",
     "createdAt": "2025-07-16T18:03:16.786Z",
-    "updatedAt": "2025-08-13T01:00:46.568Z",
+    "updatedAt": "2025-08-25T19:04:29.342Z",
     "deletedAt": null,
     "team": {
       "id": "714aad0b-05f9-4bcc-930a-1726b42a078c",
@@ -76,6 +76,61 @@
     }
   },
   {
+    "id": "56921656-a768-4f2a-9190-5526a60d6574",
+    "name": "spyglass",
+    "createdAt": "2025-03-08T21:41:29.683Z",
+    "updatedAt": "2025-08-20T03:22:32.922Z",
+    "deletedAt": null,
+    "team": {
+      "id": "714aad0b-05f9-4bcc-930a-1726b42a078c",
+      "name": "prototype"
+    },
+    "environments": {
+      "edges": [
+        {
+          "node": {
+            "id": "57e3c195-7a1a-493e-a0d8-5d0764a69b8f",
+            "name": "test"
+          }
+        }
+      ]
+    },
+    "services": {
+      "edges": [
+        {
+          "node": {
+            "id": "68cae643-44a2-4e23-9c75-7bb96963ab5a",
+            "name": "spyglass-portal",
+            "serviceInstances": {
+              "edges": [
+                {
+                  "node": {
+                    "environmentId": "57e3c195-7a1a-493e-a0d8-5d0764a69b8f"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "node": {
+            "id": "aa14aa0f-fb3f-42c9-915f-4065e84db81b",
+            "name": "spyglass-api",
+            "serviceInstances": {
+              "edges": [
+                {
+                  "node": {
+                    "environmentId": "57e3c195-7a1a-493e-a0d8-5d0764a69b8f"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
     "id": "ec7711c5-b641-4f7a-8acc-db524713534a",
     "name": "reflex-template",
     "createdAt": "2025-06-03T22:27:48.627Z",
@@ -136,76 +191,6 @@
                 {
                   "node": {
                     "environmentId": "06363e59-3d87-487d-9d90-8241ef8d7dd8"
-                  }
-                }
-              ]
-            }
-          }
-        }
-      ]
-    }
-  },
-  {
-    "id": "56921656-a768-4f2a-9190-5526a60d6574",
-    "name": "spyglass",
-    "createdAt": "2025-03-08T21:41:29.683Z",
-    "updatedAt": "2025-06-10T22:00:45.683Z",
-    "deletedAt": null,
-    "team": {
-      "id": "714aad0b-05f9-4bcc-930a-1726b42a078c",
-      "name": "prototype"
-    },
-    "environments": {
-      "edges": [
-        {
-          "node": {
-            "id": "57e3c195-7a1a-493e-a0d8-5d0764a69b8f",
-            "name": "test"
-          }
-        }
-      ]
-    },
-    "services": {
-      "edges": [
-        {
-          "node": {
-            "id": "68cae643-44a2-4e23-9c75-7bb96963ab5a",
-            "name": "spyglass-portal",
-            "serviceInstances": {
-              "edges": [
-                {
-                  "node": {
-                    "environmentId": "57e3c195-7a1a-493e-a0d8-5d0764a69b8f"
-                  }
-                }
-              ]
-            }
-          }
-        },
-        {
-          "node": {
-            "id": "730fc8c7-d80d-4ca8-800c-09e86d6c47b8",
-            "name": "Postgres",
-            "serviceInstances": {
-              "edges": [
-                {
-                  "node": {
-                    "environmentId": "57e3c195-7a1a-493e-a0d8-5d0764a69b8f"
-                  }
-                }
-              ]
-            }
-          }
-        },
-        {
-          "node": {
-            "id": "aa14aa0f-fb3f-42c9-915f-4065e84db81b",
-            "name": "spyglass-api",
-            "serviceInstances": {
-              "edges": [
-                {
-                  "node": {
-                    "environmentId": "57e3c195-7a1a-493e-a0d8-5d0764a69b8f"
                   }
                 }
               ]

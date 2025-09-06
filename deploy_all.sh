@@ -4,7 +4,7 @@
 # This script intelligently handles both initial deployments and subsequent redeployments:
 # - For new projects: Creates PostgreSQL, frontend, and backend services, configures variables, runs migrations
 # - For existing projects: Runs migrations and deploys services with fresh configs
-# - Always copies fresh Caddyfile and nixpacks.toml files before deployment
+# - Uses official Reflex Docker files (Dockerfile for backend, web.Dockerfile for frontend with nginx)
 # - Automatically detects which services exist to minimize unnecessary operations
 # - Uses 'railway up' for all deployments to ensure fresh code is deployed
 
@@ -440,13 +440,17 @@ deploy_service() {
     
     log "Deploying $service_type: $service_name"
     
-    # Copy appropriate Dockerfile instead of Caddyfile and nixpacks.toml
+    # Copy appropriate Docker files based on official Reflex Docker guide
     if [ "$service_type" = "frontend" ]; then
-        cp "$DEPLOY_DIR/Dockerfile.${service_type}" Dockerfile || error "Dockerfile.${service_type} not found"
-        log "Using Dockerfile.${service_type} for $service_name"
+        # Copy web.Dockerfile for frontend (nginx-based)
+        cp "$DEPLOY_DIR/web.Dockerfile" Dockerfile || error "web.Dockerfile not found"
+        # Copy nginx configuration
+        cp "$DEPLOY_DIR/nginx.conf" nginx.conf || error "nginx.conf not found"
+        log "Using web.Dockerfile and nginx.conf for frontend $service_name"
     elif [ "$service_type" = "backend" ]; then
-        cp "$DEPLOY_DIR/Dockerfile.${service_type}" Dockerfile || error "Dockerfile.${service_type} not found"
-        log "Using Dockerfile.${service_type} for $service_name"
+        # Copy standard Dockerfile for backend
+        cp "$DEPLOY_DIR/Dockerfile" Dockerfile || error "Dockerfile not found"
+        log "Using Dockerfile for backend $service_name"
     else
         error "Unknown service type: $service_type"
     fi
@@ -520,10 +524,13 @@ deploy_service() {
         railway up || error "Failed to deploy $service_name with Docker"
     fi
     
-    # Clean up Dockerfile after deployment
+    # Clean up Docker files after deployment
     rm -f Dockerfile
+    if [ "$service_type" = "frontend" ]; then
+        rm -f nginx.conf
+    fi
     
-    success "$service_type deployed using Docker"
+    success "$service_type deployed using official Reflex Docker configuration"
 }
 
 # Update deployment URLs after services are deployed
