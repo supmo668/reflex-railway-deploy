@@ -71,9 +71,10 @@ build_vars() {
     [ -n "$REFLEX_DB_URL" ] && arr+=("--set" "REFLEX_DB_URL=$REFLEX_DB_URL")
     
     # URLs (use actual Railway domains if available, else construct from naming convention)
+    # Per Reflex docs: REFLEX_API_URL for backend, REFLEX_DEPLOY_URL for frontend
     local backend_url="${REFLEX_API_URL:-https://${BACKEND_SERVICE}-${RAILWAY_ENVIRONMENT}.up.railway.app}"
-    local frontend_url="${FRONTEND_DEPLOY_URL:-https://${FRONTEND_SERVICE}-${RAILWAY_ENVIRONMENT}.up.railway.app}"
-    arr+=("--set" "REFLEX_API_URL=$backend_url" "--set" "FRONTEND_DEPLOY_URL=$frontend_url")
+    local frontend_url="${REFLEX_DEPLOY_URL:-https://${FRONTEND_SERVICE}-${RAILWAY_ENVIRONMENT}.up.railway.app}"
+    arr+=("--set" "REFLEX_API_URL=$backend_url" "--set" "REFLEX_DEPLOY_URL=$frontend_url")
     
     # Port
     [ "$service_type" = "frontend" ] && arr+=("--set" "PORT=3000") || arr+=("--set" "PORT=8000")

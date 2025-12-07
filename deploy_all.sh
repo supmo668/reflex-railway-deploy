@@ -85,7 +85,8 @@ build_var_args() {
     if [ "$service" = "$FRONTEND_NAME" ] && [ -n "$REFLEX_API_URL" ]; then
         VAR_ARGS+=("--set" "REFLEX_API_URL=$REFLEX_API_URL")
     fi
-    [ -n "$FRONTEND_DEPLOY_URL" ] && VAR_ARGS+=("--set" "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL")
+    # Per Reflex docs: REFLEX_DEPLOY_URL sets deploy_url (frontend URL)
+    [ -n "$REFLEX_DEPLOY_URL" ] && VAR_ARGS+=("--set" "REFLEX_DEPLOY_URL=$REFLEX_DEPLOY_URL")
 }
 
 # Set vars and deploy in ONE railway up command
@@ -120,7 +121,7 @@ update_urls() {
     frontend_domain=$(railway variables --service "$FRONTEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
     
     [ -n "$backend_domain" ] && REFLEX_API_URL="https://$backend_domain"
-    [ -n "$frontend_domain" ] && FRONTEND_DEPLOY_URL="https://$frontend_domain"
+    [ -n "$frontend_domain" ] && REFLEX_DEPLOY_URL="https://$frontend_domain"
 }
 
 # ╔═══════════════════════════════════════════════════════════════════╗
@@ -187,7 +188,7 @@ deploy() {
     # Summary
     header "Deployment Complete"
     echo "✓ Backend:  $REFLEX_API_URL"
-    echo "✓ Frontend: $FRONTEND_DEPLOY_URL"
+    echo "✓ Frontend: $REFLEX_DEPLOY_URL"
 }
 
 # ╔═══════════════════════════════════════════════════════════════════╗
