@@ -1,6 +1,7 @@
 import reflex as rx
 from ..state import State, BioAllowableActionTypes
-from typing import Any, Callable, List
+from typing import Any, Callable
+
 
 def create_label(text: str) -> rx.Component:
     """Create a label with specific styling."""
@@ -11,6 +12,7 @@ def create_label(text: str) -> rx.Component:
         color="var(--text-color)",
         margin_bottom="0.5rem",
     )
+
 
 def create_button(text, on_click, color_scheme="primary"):
     """Create a button with specific styling."""
@@ -28,7 +30,10 @@ def create_button(text, on_click, color_scheme="primary"):
         transition="all 0.2s",
     )
 
-def create_input_field(placeholder: str, value: Any, on_change: Any, **kwargs) -> rx.Component:
+
+def create_input_field(
+    placeholder: str, value: Any, on_change: Any, **kwargs
+) -> rx.Component:
     """Create a styled input field."""
     return rx.input(
         placeholder=placeholder,
@@ -41,6 +46,7 @@ def create_input_field(placeholder: str, value: Any, on_change: Any, **kwargs) -
         _focus={"border_color": "var(--border-focus-color)"},
         **kwargs,
     )
+
 
 def create_textarea(placeholder, value, on_change):
     """Create a textarea element with specified attributes and styling."""
@@ -61,7 +67,10 @@ def create_textarea(placeholder, value, on_change):
         min_height="100px",
     )
 
-def create_labeled_input(label_text: str, placeholder: str, value: str, on_change: Callable) -> rx.Component:
+
+def create_labeled_input(
+    label_text: str, placeholder: str, value: str, on_change: Callable
+) -> rx.Component:
     """Create a box containing a label and an input field in a row."""
     return rx.hstack(
         rx.text(label_text, font_weight="500", min_width="150px"),
@@ -75,7 +84,10 @@ def create_labeled_input(label_text: str, placeholder: str, value: str, on_chang
         spacing="4",
     )
 
-def create_labeled_textarea(label_text: str, placeholder: str, value: str, on_change: Callable) -> rx.Component:
+
+def create_labeled_textarea(
+    label_text: str, placeholder: str, value: str, on_change: Callable
+) -> rx.Component:
     """Create a box containing a label and a textarea in a row."""
     return rx.hstack(
         rx.text(label_text, font_weight="500", min_width="150px"),
@@ -90,6 +102,7 @@ def create_labeled_textarea(label_text: str, placeholder: str, value: str, on_ch
         spacing="4",
         align_items="flex-start",
     )
+
 
 def create_error_message(error_text: str) -> rx.Component:
     """Create an error message component."""
@@ -110,6 +123,7 @@ def create_error_message(error_text: str) -> rx.Component:
         ),
     )
 
+
 def create_success_message(success_text: str) -> rx.Component:
     """Create a success message component."""
     return rx.cond(
@@ -129,6 +143,7 @@ def create_success_message(success_text: str) -> rx.Component:
         ),
     )
 
+
 def create_video_player():
     """Create the video player component."""
     return rx.vstack(
@@ -141,9 +156,17 @@ def create_video_player():
         ),
         create_error_message(State.video_error),
         rx.hstack(
-            rx.text(f"Current Frame: {State.current_frame} (at {State.current_time:.2f} seconds)", color="var(--text-color)"),
+            rx.text(
+                f"Current Frame: {State.current_frame} (at {State.current_time:.2f} seconds)",
+                color="var(--text-color)",
+            ),
             rx.hstack(
-                rx.text("FPS:", font_weight="500", margin_right="0.5rem", color="var(--text-color)"),
+                rx.text(
+                    "FPS:",
+                    font_weight="500",
+                    margin_right="0.5rem",
+                    color="var(--text-color)",
+                ),
                 rx.input(
                     placeholder="FPS",
                     value=State.fps,
@@ -166,10 +189,13 @@ def create_video_player():
         spacing="4",
     )
 
+
 def create_annotations_table():
     """Create a table to display annotations."""
     return rx.box(
-        rx.heading("Annotations", size="3", margin_bottom="1rem", color="var(--text-color)"),
+        rx.heading(
+            "Annotations", size="3", margin_bottom="1rem", color="var(--text-color)"
+        ),
         rx.data_table(
             data=State.table_data,
             columns=State.table_columns,
@@ -192,6 +218,7 @@ def create_annotations_table():
         margin_top="1rem",
         margin_bottom="1rem",
     )
+
 
 def create_annotation_form():
     """Create the annotation form."""
@@ -290,10 +317,16 @@ def create_annotation_form():
         max_width="100%",
     )
 
+
 def create_huggingface_section():
     """Create the Hugging Face dataset section."""
     return rx.box(
-        rx.heading("Hugging Face Dataset", size="3", margin_bottom="1rem", color="var(--text-color)"),
+        rx.heading(
+            "Hugging Face Dataset",
+            size="3",
+            margin_bottom="1rem",
+            color="var(--text-color)",
+        ),
         rx.vstack(
             rx.hstack(
                 rx.input(
@@ -349,10 +382,16 @@ def create_huggingface_section():
         width="100%",
     )
 
+
 def create_main_content():
     """Create the main content of the page."""
     return rx.box(
-        rx.heading("LabAR Video Report Annotation", size="2", margin_bottom="1.5rem", color="var(--text-color)"),
+        rx.heading(
+            "LabAR Video Report Annotation",
+            size="2",
+            margin_bottom="1.5rem",
+            color="var(--text-color)",
+        ),
         rx.vstack(
             create_input_field(
                 placeholder="Enter video URL...",
@@ -382,6 +421,7 @@ def create_main_content():
         max_width="56rem",
         margin="2rem auto",
     )
+
 
 def index():
     """The main page."""
@@ -418,6 +458,6 @@ def index():
                 "--button-bg": "hsl(215, 100%, 50%)",
                 "--button-hover-bg": "hsl(215, 100%, 55%)",
                 "--input-bg": "hsl(0, 0%, 20%)",
-            }
+            },
         },
     )

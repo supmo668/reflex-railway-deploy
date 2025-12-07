@@ -4,6 +4,7 @@ import reflex as rx
 import app.config as CONFIG
 
 from app.reflex_user_portal.utils.logger import get_logger
+
 # Initialize logger
 logger = get_logger(__name__)
 
@@ -25,4 +26,6 @@ config = rx.Config(
     show_built_with_reflex=False,
     tailwind=None,
 )
-print(f"Configuring Reflex with database URL: {CONFIG.DATABASE_URL.split('://')[0]}://<hidden>")  # Hide password in logs
+print(
+    f"Configuring Reflex with database URL: {CONFIG.DATABASE_URL.split('://')[0]}://<hidden>"
+)  # Hide password in logs
