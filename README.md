@@ -52,8 +52,7 @@ The deployment script automatically sets these on Railway services:
 
 | Variable | Description |
 |----------|-------------|
-| `DB_URL` | PostgreSQL connection URL (from Railway Postgres service) |
-| `DATABASE_URL` | Same as DB_URL (for compatibility) |
+| `REFLEX_DB_URL` | PostgreSQL connection URL (from Railway Postgres service) |
 | `REFLEX_API_URL` | Backend URL for frontend to call API |
 | `FRONTEND_DEPLOY_URL` | Frontend URL for CORS configuration |
 | `PORT` | Service port (8000 for backend, 3000 for frontend) |

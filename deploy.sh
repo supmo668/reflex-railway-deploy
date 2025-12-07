@@ -1,64 +1,41 @@
 #!/bin/bash
-# deploy.sh - Generic Railway deployment script for Reflex applications using Dockerfiles
-# 
-# Usage: ./deploy.sh -p PROJECT -e ENVIRONMENT -b BACKEND_SERVICE -f FRONTEND_SERVICE [OPTIONS]
-# 
-# This script deploys a Reflex app to Railway using Dockerfiles.
-# All app-specific parameters must be provided via arguments or environment variables.
+# deploy.sh - Streamlined Railway deployment for Reflex apps
+# Usage: ./deploy.sh -p PROJECT -e ENV -b BACKEND -f FRONTEND [OPTIONS]
+#
+# Deployment flow:
+#   1. Link to Railway project
+#   2. Get database URL from Postgres service
+#   3. Ensure services exist
+#   4. Set ALL variables in ONE batch per service (triggers ONE redeploy)
+#   5. Deploy code via 'railway up' (pushes new code)
+#   6. Ensure domains exist
 
 set -e
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# === LOGGING ===
+RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[1;33m' BLUE='\033[0;34m' NC='\033[0m'
+log()     { echo -e "${BLUE}[INFO]${NC} $1"; }
+success() { echo -e "${GREEN}[OK]${NC} $1"; }
+warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
+error()   { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
-log() { echo -e "${BLUE}[INFO]${NC} $1"; }
-success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
-warn() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
-error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
-
-show_help() {
-    echo "Usage: $0 [OPTIONS]"
-    echo ""
-    echo "Required Options:"
-    echo "  -p, --project PROJECT       Railway project name"
-    echo "  -e, --environment ENV       Railway environment (e.g., test, production)"
-    echo "  -b, --backend SERVICE       Backend service name"
-    echo "  -f, --frontend SERVICE      Frontend service name"
-    echo ""
-    echo "Optional Options:"
-    echo "  -d, --deploy-dir DIR        Deploy directory with Dockerfiles (default: reflex-railway-deploy)"
-    echo "      --env-file FILE         Environment file to source (default: .env)"
-    echo "      --skip-db               Skip PostgreSQL service lookup"
-    echo "      --postgres-service NAME Name of PostgreSQL service (default: Postgres)"
-    echo "  -h, --help                  Show this help message"
-    echo ""
-    echo "Environment Variables (can be set instead of arguments):"
-    echo "  RAILWAY_PROJECT             Railway project name"
-    echo "  RAILWAY_ENVIRONMENT         Railway environment"
-    echo "  BACKEND_SERVICE             Backend service name"
-    echo "  FRONTEND_SERVICE            Frontend service name"
-    echo "  DEPLOY_DIR                  Deploy directory"
-    echo "  APP_ENV_VARS                Space-separated list of env vars to set on services"
-    echo ""
-    echo "Examples:"
-    echo "  $0 -p myproject -e test -b api -f web"
-    echo "  $0 -p myproject -e production -b backend -f frontend --skip-db"
-    exit 0
-}
-
-# Parse arguments
+# === PARSE ARGS ===
 DEPLOY_DIR="reflex-railway-deploy"
-ENV_FILE=".env"
 SKIP_DB=false
 POSTGRES_SERVICE="Postgres"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -h|--help) show_help ;;
+        -h|--help)
+            echo "Usage: $0 -p PROJECT -e ENV -b BACKEND -f FRONTEND [OPTIONS]"
+            echo "  -p PROJECT    Railway project name"
+            echo "  -e ENV        Railway environment (test, production)"
+            echo "  -b BACKEND    Backend service name"
+            echo "  -f FRONTEND   Frontend service name"
+            echo "  -d DIR        Deploy directory (default: reflex-railway-deploy)"
+            echo "  --env-file    Environment file (default: .env)"
+            echo "  --skip-db     Skip PostgreSQL lookup"
+            exit 0 ;;
         -p|--project) RAILWAY_PROJECT="$2"; shift 2 ;;
         -e|--environment) RAILWAY_ENVIRONMENT="$2"; shift 2 ;;
         -b|--backend) BACKEND_SERVICE="$2"; shift 2 ;;
@@ -67,187 +44,116 @@ while [[ $# -gt 0 ]]; do
         --env-file) ENV_FILE="$2"; shift 2 ;;
         --skip-db) SKIP_DB=true; shift ;;
         --postgres-service) POSTGRES_SERVICE="$2"; shift 2 ;;
-        *) error "Unknown option: $1. Use -h for help." ;;
+        *) error "Unknown option: $1" ;;
     esac
 done
 
-# Validate required parameters
-[ -z "$RAILWAY_PROJECT" ] && error "Railway project is required. Use -p PROJECT"
-[ -z "$RAILWAY_ENVIRONMENT" ] && error "Railway environment is required. Use -e ENVIRONMENT"
-[ -z "$BACKEND_SERVICE" ] && error "Backend service name is required. Use -b SERVICE"
-[ -z "$FRONTEND_SERVICE" ] && error "Frontend service name is required. Use -f SERVICE"
+# === VALIDATE ===
+[ -z "$RAILWAY_PROJECT" ] && error "Missing -p PROJECT"
+[ -z "$RAILWAY_ENVIRONMENT" ] && error "Missing -e ENVIRONMENT"
+[ -z "$BACKEND_SERVICE" ] && error "Missing -b BACKEND"
+[ -z "$FRONTEND_SERVICE" ] && error "Missing -f FRONTEND"
+[ -d "$DEPLOY_DIR" ] || error "Deploy dir '$DEPLOY_DIR' not found"
+command -v railway &>/dev/null || error "Railway CLI not found"
+railway whoami &>/dev/null || error "Not logged in. Run 'railway login'"
 
-# Validate deploy directory
-[ -d "$DEPLOY_DIR" ] || error "Deploy directory '$DEPLOY_DIR' not found"
-[ -f "$DEPLOY_DIR/Dockerfile.backend" ] || error "Dockerfile.backend not found in $DEPLOY_DIR"
-[ -f "$DEPLOY_DIR/Dockerfile.frontend" ] || error "Dockerfile.frontend not found in $DEPLOY_DIR"
+# Source env file
+[ -f "${ENV_FILE:-.env}" ] && { set -a; source "${ENV_FILE:-.env}"; set +a; }
 
-# Source environment file if exists
-if [ -f "$ENV_FILE" ]; then
-    log "Sourcing environment from $ENV_FILE"
-    set -a; source "$ENV_FILE"; set +a
-fi
+# === HELPER FUNCTIONS ===
 
-# Validate Railway CLI
-command -v railway &> /dev/null || error "Railway CLI not found. Install with: npm i -g @railway/cli"
-railway whoami &> /dev/null || error "Not logged in to Railway. Run 'railway login' first"
-
-# Construct Railway URLs based on service names and environment
-# Railway URL format: <service>-<environment>.up.railway.app
-BACKEND_URL="https://${BACKEND_SERVICE}-${RAILWAY_ENVIRONMENT}.up.railway.app"
-FRONTEND_URL="https://${FRONTEND_SERVICE}-${RAILWAY_ENVIRONMENT}.up.railway.app"
-
-log "=========================================="
-log "Railway Deployment Configuration"
-log "=========================================="
-log "Project:     $RAILWAY_PROJECT"
-log "Environment: $RAILWAY_ENVIRONMENT"
-log "Backend:     $BACKEND_SERVICE -> $BACKEND_URL"
-log "Frontend:    $FRONTEND_SERVICE -> $FRONTEND_URL"
-log "=========================================="
-
-# Link to Railway project
-log "Linking to Railway project..."
-railway link -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" || error "Failed to link to Railway project"
-
-# Get database URL from Postgres service
-DB_URL=""
-if [ "$SKIP_DB" = false ]; then
-    log "Getting database URL from $POSTGRES_SERVICE service..."
-    DB_URL=$(railway variables --service "$POSTGRES_SERVICE" --json 2>/dev/null | jq -r '.DATABASE_URL // empty' 2>/dev/null || echo "")
+# Build variables array for a service
+build_vars() {
+    local service_type=$1  # "backend" or "frontend"
+    local -n arr=$2        # nameref to output array
     
-    if [ -z "$DB_URL" ]; then
-        warn "Could not get DATABASE_URL from $POSTGRES_SERVICE service."
-    else
-        log "Database URL retrieved successfully"
-    fi
-fi
+    # Database - only set if REFLEX_DB_URL is explicitly provided
+    [ -n "$REFLEX_DB_URL" ] && arr+=("--set" "REFLEX_DB_URL=$REFLEX_DB_URL")
+    
+    # URLs (use actual Railway domains if available, else construct from naming convention)
+    local backend_url="${REFLEX_API_URL:-https://${BACKEND_SERVICE}-${RAILWAY_ENVIRONMENT}.up.railway.app}"
+    local frontend_url="${FRONTEND_DEPLOY_URL:-https://${FRONTEND_SERVICE}-${RAILWAY_ENVIRONMENT}.up.railway.app}"
+    arr+=("--set" "REFLEX_API_URL=$backend_url" "--set" "FRONTEND_DEPLOY_URL=$frontend_url")
+    
+    # Port
+    [ "$service_type" = "frontend" ] && arr+=("--set" "PORT=3000") || arr+=("--set" "PORT=8000")
+    
+    # App-specific vars from APP_ENV_VARS
+    for var in $APP_ENV_VARS; do
+        [ -n "${!var}" ] && arr+=("--set" "$var=${!var}")
+    done
+}
 
-# Function to create service if it doesn't exist
-create_service_if_needed() {
-    local service_name=$1
-    log "Checking service: $service_name..."
-    if ! railway variables --service "$service_name" &>/dev/null 2>&1; then
-        log "Creating service: $service_name"
-        railway add -s "$service_name" || error "Failed to create $service_name service"
-        sleep 5
-    else
-        log "Service $service_name already exists"
+# Set all variables on a service (single command = single redeploy)
+set_vars() {
+    local service=$1 service_type=$2
+    local vars=()
+    build_vars "$service_type" vars
+    
+    if [ ${#vars[@]} -gt 0 ]; then
+        log "Setting $((${#vars[@]}/2)) vars on $service..."
+        railway variables --service "$service" "${vars[@]}" || warn "Some vars failed for $service"
     fi
 }
 
-# Function to set environment variables on a service (BATCHED to avoid rate limits)
-set_service_vars() {
-    local service_name=$1
-    local is_frontend=$2
-    
-    log "Setting environment variables for $service_name..."
-    
-    # Build array of all variables to set in ONE command
-    local var_args=()
-    
-    # Database URL
-    if [ -n "$DB_URL" ]; then
-        var_args+=("--set" "DB_URL=$DB_URL")
-        var_args+=("--set" "DATABASE_URL=$DB_URL")
-    fi
-    
-    # Deployment URLs
-    var_args+=("--set" "REFLEX_API_URL=$BACKEND_URL")
-    var_args+=("--set" "FRONTEND_DEPLOY_URL=$FRONTEND_URL")
-    
-    # Port configuration
-    if [ "$is_frontend" = true ]; then
-        var_args+=("--set" "PORT=3000")
-    else
-        var_args+=("--set" "PORT=8000")
-    fi
-    
-    # Add app-specific variables from APP_ENV_VARS
-    if [ -n "$APP_ENV_VARS" ]; then
-        for var in $APP_ENV_VARS; do
-            value="${!var}"
-            if [ -n "$value" ]; then
-                var_args+=("--set" "$var=$value")
-            fi
-        done
-    fi
-    
-    # Set ALL variables in a SINGLE command to avoid triggering multiple deployments
-    if [ ${#var_args[@]} -gt 0 ]; then
-        local var_count=$((${#var_args[@]} / 2))
-        log "Setting $var_count variables in a single command..."
-        if railway variables --service "$service_name" "${var_args[@]}"; then
-            log "✓ All variables set for $service_name"
-        else
-            warn "Failed to set some variables for $service_name"
-        fi
-    fi
-}
-
-# Function to deploy a service
-deploy_service() {
-    local service_name=$1
-    local dockerfile=$2
-    
-    log "Preparing Dockerfile for $service_name..."
+# Deploy code to a service
+deploy() {
+    local service=$1 dockerfile=$2
+    log "Deploying $service..."
     cp "$DEPLOY_DIR/$dockerfile" Dockerfile
-    
-    log "Deploying $service_name..."
-    railway up --service "$service_name" || error "Failed to deploy $service_name"
-    success "$service_name deployed!"
-    
-    # Clean up
+    railway up --service "$service" || error "Failed to deploy $service"
     rm -f Dockerfile
+    success "$service deployed"
 }
 
-# Function to ensure service has a domain
-ensure_domain() {
-    local service_name=$1
-    
-    log "Ensuring domain for $service_name..."
-    local domain=$(railway variables --service "$service_name" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
-    
-    if [ -z "$domain" ]; then
-        log "Generating domain for $service_name..."
-        railway domain --service "$service_name" || warn "Failed to generate domain"
-        sleep 5
+# Ensure service exists
+ensure_service() {
+    local service=$1
+    if ! railway variables --service "$service" &>/dev/null; then
+        log "Creating service: $service"
+        railway add -s "$service" || error "Failed to create $service"
+        sleep 3
     fi
 }
 
-# Create services if needed
-create_service_if_needed "$BACKEND_SERVICE"
-create_service_if_needed "$FRONTEND_SERVICE"
+# === MAIN ===
+log "=== Railway Deployment ==="
+log "Project: $RAILWAY_PROJECT | Env: $RAILWAY_ENVIRONMENT"
+log "Backend: $BACKEND_SERVICE | Frontend: $FRONTEND_SERVICE"
 
-# Set environment variables
-set_service_vars "$BACKEND_SERVICE" false
-set_service_vars "$FRONTEND_SERVICE" true
+# 1. Link to project
+railway link -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" || error "Failed to link"
 
-# Deploy backend
-deploy_service "$BACKEND_SERVICE" "Dockerfile.backend"
-log "Waiting for backend to initialize..."
-sleep 10
+# 2. Get database URL (Railway Postgres provides DATABASE_URL, we map to REFLEX_DB_URL)
+if [ "$SKIP_DB" = false ]; then
+    REFLEX_DB_URL=$(railway variables --service "$POSTGRES_SERVICE" --json 2>/dev/null | jq -r '.DATABASE_URL // empty' || echo "")
+    [ -n "$REFLEX_DB_URL" ] && success "Database URL retrieved (REFLEX_DB_URL)" || warn "No database URL found"
+fi
 
-# Ensure backend has domain
-ensure_domain "$BACKEND_SERVICE"
+# 3. Ensure services exist
+ensure_service "$BACKEND_SERVICE"
+ensure_service "$FRONTEND_SERVICE"
 
-# Deploy frontend
-deploy_service "$FRONTEND_SERVICE" "Dockerfile.frontend"
+# 4. Set variables (batched - triggers ONE redeploy per service with OLD code)
+set_vars "$BACKEND_SERVICE" "backend"
+set_vars "$FRONTEND_SERVICE" "frontend"
 
-# Ensure frontend has domain
-ensure_domain "$FRONTEND_SERVICE"
+# 5. Deploy code (pushes NEW code)
+deploy "$BACKEND_SERVICE" "Dockerfile.backend"
+deploy "$FRONTEND_SERVICE" "Dockerfile.frontend"
 
-# Get final domains
-BACKEND_DOMAIN=$(railway variables --service "$BACKEND_SERVICE" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
-FRONTEND_DOMAIN=$(railway variables --service "$FRONTEND_SERVICE" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
+# 6. Ensure domains exist
+railway domain --service "$BACKEND_SERVICE" &>/dev/null || true
+railway domain --service "$FRONTEND_SERVICE" &>/dev/null || true
+
+# 7. Summary
+BACKEND_DOMAIN=$(railway variables --service "$BACKEND_SERVICE" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' || echo "")
+FRONTEND_DOMAIN=$(railway variables --service "$FRONTEND_SERVICE" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' || echo "")
 
 echo ""
-echo "=========================================="
-success "Deployment Complete!"
-echo "=========================================="
-echo ""
-[ -n "$FRONTEND_DOMAIN" ] && echo "✓ Frontend: https://$FRONTEND_DOMAIN"
-[ -n "$BACKEND_DOMAIN" ] && echo "✓ Backend:  https://$BACKEND_DOMAIN"
+success "=== Deployment Complete ==="
+[ -n "$FRONTEND_DOMAIN" ] && echo "  Frontend: https://$FRONTEND_DOMAIN"
+[ -n "$BACKEND_DOMAIN" ] && echo "  Backend:  https://$BACKEND_DOMAIN"
 [ "$SKIP_DB" = false ] && echo "✓ PostgreSQL: Database running"
 echo ""
 echo "Check status at: https://railway.app/project/$RAILWAY_PROJECT"
