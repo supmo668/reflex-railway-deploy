@@ -392,31 +392,34 @@ setup_services() {
                 exit 1
             fi
             
-            # Always update REFLEX_DB_URL from Postgres service to maintain consistency
-            log "Updating REFLEX_DB_URL for $service from Postgres service"
+            # Build batched Railway-derived variables to set in ONE command
+            local derived_vars=()
+            
+            # Add REFLEX_DB_URL if available
             if [ -n "$DATABASE_URL" ]; then
-                if railway variables --service "$service" --set "REFLEX_DB_URL=$DATABASE_URL" >/dev/null 2>&1; then
-                    log "✓ REFLEX_DB_URL updated for $service"
-                else
-                    warn "Failed to set REFLEX_DB_URL for $service"
-                fi
-            else
-                warn "DATABASE_URL not available, skipping REFLEX_DB_URL update for $service"
+                derived_vars+=("--set" "REFLEX_DB_URL=$DATABASE_URL")
+                log "  Will set REFLEX_DB_URL for $service"
             fi
             
-            # Always update REFLEX_API_URL for frontend service from backend's RAILWAY_PUBLIC_DOMAIN
+            # Add REFLEX_API_URL for frontend service from backend's RAILWAY_PUBLIC_DOMAIN
             if [ "$service" = "$FRONTEND_NAME" ]; then
-                log "Updating REFLEX_API_URL for frontend service from backend's RAILWAY_PUBLIC_DOMAIN"
                 BACKEND_DOMAIN=$(railway variables --service "$BACKEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
                 if [ -n "$BACKEND_DOMAIN" ]; then
                     REFLEX_API_URL="https://$BACKEND_DOMAIN"
-                    if railway variables --service "$service" --set "REFLEX_API_URL=$REFLEX_API_URL" >/dev/null 2>&1; then
-                        log "✓ REFLEX_API_URL updated for frontend: $REFLEX_API_URL"
-                    else
-                        warn "Failed to set REFLEX_API_URL for frontend"
-                    fi
+                    derived_vars+=("--set" "REFLEX_API_URL=$REFLEX_API_URL")
+                    log "  Will set REFLEX_API_URL=$REFLEX_API_URL for frontend"
                 else
                     warn "Backend RAILWAY_PUBLIC_DOMAIN not available yet, REFLEX_API_URL will be set after backend deployment"
+                fi
+            fi
+            
+            # Set all derived variables in ONE command to avoid multiple deployments
+            if [ ${#derived_vars[@]} -gt 0 ]; then
+                log "Setting Railway-derived variables for $service in a single command..."
+                if railway variables --service "$service" "${derived_vars[@]}" >/dev/null 2>&1; then
+                    log "✓ Railway-derived variables updated for $service"
+                else
+                    warn "Failed to set some Railway-derived variables for $service"
                 fi
             fi
             
@@ -474,31 +477,34 @@ deploy_service() {
                 exit 1
             fi
             
-            # Always update REFLEX_DB_URL from Postgres service to maintain consistency
-            log "Updating REFLEX_DB_URL for $service_name from Postgres service"
+            # Build batched Railway-derived variables to set in ONE command
+            local derived_vars=()
+            
+            # Add REFLEX_DB_URL if available
             if [ -n "$DATABASE_URL" ]; then
-                if railway variables --service "$service_name" --set "REFLEX_DB_URL=$DATABASE_URL" >/dev/null 2>&1; then
-                    log "✓ REFLEX_DB_URL updated for $service_name"
-                else
-                    warn "Failed to set REFLEX_DB_URL for $service_name"
-                fi
-            else
-                warn "DATABASE_URL not available, skipping REFLEX_DB_URL update for $service_name"
+                derived_vars+=("--set" "REFLEX_DB_URL=$DATABASE_URL")
+                log "  Will set REFLEX_DB_URL for $service_name"
             fi
             
-            # Always update REFLEX_API_URL for frontend service from backend's RAILWAY_PUBLIC_DOMAIN
+            # Add REFLEX_API_URL for frontend service from backend's RAILWAY_PUBLIC_DOMAIN
             if [ "$service_name" = "$FRONTEND_NAME" ]; then
-                log "Updating REFLEX_API_URL for frontend service from backend's RAILWAY_PUBLIC_DOMAIN"
                 BACKEND_DOMAIN=$(railway variables --service "$BACKEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
                 if [ -n "$BACKEND_DOMAIN" ]; then
                     REFLEX_API_URL="https://$BACKEND_DOMAIN"
-                    if railway variables --service "$service_name" --set "REFLEX_API_URL=$REFLEX_API_URL" >/dev/null 2>&1; then
-                        log "✓ REFLEX_API_URL updated for frontend: $REFLEX_API_URL"
-                    else
-                        warn "Failed to set REFLEX_API_URL for frontend"
-                    fi
+                    derived_vars+=("--set" "REFLEX_API_URL=$REFLEX_API_URL")
+                    log "  Will set REFLEX_API_URL=$REFLEX_API_URL for frontend"
                 else
                     warn "Backend RAILWAY_PUBLIC_DOMAIN not available yet, REFLEX_API_URL will be set after backend deployment"
+                fi
+            fi
+            
+            # Set all derived variables in ONE command to avoid multiple deployments
+            if [ ${#derived_vars[@]} -gt 0 ]; then
+                log "Setting Railway-derived variables for $service_name in a single command..."
+                if railway variables --service "$service_name" "${derived_vars[@]}" >/dev/null 2>&1; then
+                    log "✓ Railway-derived variables updated for $service_name"
+                else
+                    warn "Failed to set some Railway-derived variables for $service_name"
                 fi
             fi
         else
@@ -571,34 +577,64 @@ update_deployment_urls() {
         if [ -n "$BACKEND_DOMAIN" ]; then
             REFLEX_API_URL="https://$BACKEND_DOMAIN"
             update_env "REFLEX_API_URL" "$REFLEX_API_URL" "$ENV_FILE"
-            # Set for frontend service
-            railway variables --service "$FRONTEND_NAME" --set "REFLEX_API_URL=$REFLEX_API_URL" >/dev/null 2>&1 || warn "Failed to set REFLEX_API_URL on frontend"
-            log "Backend API URL set for frontend: $REFLEX_API_URL"
         fi
         
         if [ -n "$FRONTEND_DOMAIN" ]; then
             FRONTEND_DEPLOY_URL="https://$FRONTEND_DOMAIN"
             update_env "FRONTEND_DEPLOY_URL" "$FRONTEND_DEPLOY_URL" "$ENV_FILE"
-            # Set for both services
-            railway variables --service "$BACKEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" >/dev/null 2>&1 || warn "Failed to set FRONTEND_DEPLOY_URL on backend"
-            railway variables --service "$FRONTEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" >/dev/null 2>&1 || warn "Failed to set FRONTEND_DEPLOY_URL on frontend"
-            log "Frontend URL set: $FRONTEND_DEPLOY_URL"
+        fi
+        
+        # Batch set URL variables for both services in ONE command each to avoid rate limits
+        if [ -n "$BACKEND_DOMAIN" ] || [ -n "$FRONTEND_DOMAIN" ]; then
+            # Backend service: only needs FRONTEND_DEPLOY_URL
+            if [ -n "$FRONTEND_DOMAIN" ]; then
+                log "Setting FRONTEND_DEPLOY_URL for backend service..."
+                railway variables --service "$BACKEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" >/dev/null 2>&1 || warn "Failed to set FRONTEND_DEPLOY_URL on backend"
+            fi
+            
+            # Frontend service: needs both REFLEX_API_URL and FRONTEND_DEPLOY_URL
+            local frontend_vars=()
+            [ -n "$BACKEND_DOMAIN" ] && frontend_vars+=("--set" "REFLEX_API_URL=$REFLEX_API_URL")
+            [ -n "$FRONTEND_DOMAIN" ] && frontend_vars+=("--set" "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL")
+            
+            if [ ${#frontend_vars[@]} -gt 0 ]; then
+                log "Setting URL variables for frontend service in a single command..."
+                railway variables --service "$FRONTEND_NAME" "${frontend_vars[@]}" >/dev/null 2>&1 || warn "Failed to set URL variables on frontend"
+            fi
+            
+            log "Backend API URL: $REFLEX_API_URL"
+            log "Frontend URL: $FRONTEND_DEPLOY_URL"
         fi
     else
         log "Services already exist, setting URLs for existing services"
-        # For existing services, still set REFLEX_API_URL for frontend from backend domain
+        # For existing services, batch set URL variables to avoid rate limits
         if [ -n "$BACKEND_DOMAIN" ]; then
             REFLEX_API_URL="https://$BACKEND_DOMAIN"
-            # Always set REFLEX_API_URL for frontend service, even for existing services
-            railway variables --service "$FRONTEND_NAME" --set "REFLEX_API_URL=$REFLEX_API_URL" >/dev/null 2>&1 || warn "Failed to set REFLEX_API_URL on frontend"
-            log "Backend API URL set for frontend: $REFLEX_API_URL"
         fi
         if [ -n "$FRONTEND_DOMAIN" ]; then
             FRONTEND_DEPLOY_URL="https://$FRONTEND_DOMAIN"
-            # Optionally set FRONTEND_DEPLOY_URL for existing services too
-            railway variables --service "$BACKEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" >/dev/null 2>&1 || warn "Failed to set FRONTEND_DEPLOY_URL on backend"
-            railway variables --service "$FRONTEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" >/dev/null 2>&1 || warn "Failed to set FRONTEND_DEPLOY_URL on frontend"
-            log "Frontend URL set: $FRONTEND_DEPLOY_URL"
+        fi
+        
+        # Batch set URL variables for both services in ONE command each
+        if [ -n "$BACKEND_DOMAIN" ] || [ -n "$FRONTEND_DOMAIN" ]; then
+            # Backend service: only needs FRONTEND_DEPLOY_URL
+            if [ -n "$FRONTEND_DOMAIN" ]; then
+                log "Setting FRONTEND_DEPLOY_URL for backend service..."
+                railway variables --service "$BACKEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" >/dev/null 2>&1 || warn "Failed to set FRONTEND_DEPLOY_URL on backend"
+            fi
+            
+            # Frontend service: needs both REFLEX_API_URL and FRONTEND_DEPLOY_URL
+            local frontend_vars=()
+            [ -n "$BACKEND_DOMAIN" ] && frontend_vars+=("--set" "REFLEX_API_URL=$REFLEX_API_URL")
+            [ -n "$FRONTEND_DOMAIN" ] && frontend_vars+=("--set" "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL")
+            
+            if [ ${#frontend_vars[@]} -gt 0 ]; then
+                log "Setting URL variables for frontend service in a single command..."
+                railway variables --service "$FRONTEND_NAME" "${frontend_vars[@]}" >/dev/null 2>&1 || warn "Failed to set URL variables on frontend"
+            fi
+            
+            log "Backend API URL: $REFLEX_API_URL"
+            log "Frontend URL: $FRONTEND_DEPLOY_URL"
         fi
     fi
     
@@ -635,12 +671,16 @@ deploy_all() {
         read -r response
         if [[ "$response" =~ ^[Nn]$ ]]; then
             log "Skipping FRONTEND_DEPLOY_URL update"
+        else
             log "Getting frontend domain for FRONTEND_DEPLOY_URL"
             FRONTEND_DOMAIN=$(railway variables --service "$FRONTEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
             if [ -n "$FRONTEND_DOMAIN" ]; then
                 FRONTEND_DEPLOY_URL="https://$FRONTEND_DOMAIN"
-                # Set FRONTEND_DEPLOY_URL on both services
+                
+                # Batch set FRONTEND_DEPLOY_URL on both services (2 commands, but can't combine cross-service)
+                log "Setting FRONTEND_DEPLOY_URL on backend..."
                 railway variables --service "$BACKEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" >/dev/null 2>&1 || warn "Failed to set FRONTEND_DEPLOY_URL on backend"
+                log "Setting FRONTEND_DEPLOY_URL on frontend..."
                 railway variables --service "$FRONTEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" >/dev/null 2>&1 || warn "Failed to set FRONTEND_DEPLOY_URL on frontend"
                 log "✓ FRONTEND_DEPLOY_URL set: $FRONTEND_DEPLOY_URL"
                 
@@ -660,19 +700,29 @@ deploy_all() {
         BACKEND_DOMAIN=$(railway variables --service "$BACKEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
         FRONTEND_DOMAIN=$(railway variables --service "$FRONTEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
         
-        # Ensure REFLEX_API_URL is set correctly for frontend
+        # Batch set URL variables to avoid triggering multiple deployments
         if [ -n "$BACKEND_DOMAIN" ]; then
             REFLEX_API_URL="https://$BACKEND_DOMAIN"
-            railway variables --service "$FRONTEND_NAME" --set "REFLEX_API_URL=$REFLEX_API_URL" >/dev/null 2>&1 || warn "Failed to set REFLEX_API_URL on frontend"
-            log "✓ REFLEX_API_URL ensured for frontend: $REFLEX_API_URL"
         fi
-        
-        # Ensure FRONTEND_DEPLOY_URL is set correctly for both services
         if [ -n "$FRONTEND_DOMAIN" ]; then
             FRONTEND_DEPLOY_URL="https://$FRONTEND_DOMAIN"
+        fi
+        
+        # Backend service: only needs FRONTEND_DEPLOY_URL
+        if [ -n "$FRONTEND_DOMAIN" ]; then
+            log "Setting FRONTEND_DEPLOY_URL for backend..."
             railway variables --service "$BACKEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" >/dev/null 2>&1 || warn "Failed to set FRONTEND_DEPLOY_URL on backend"
-            railway variables --service "$FRONTEND_NAME" --set "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL" >/dev/null 2>&1 || warn "Failed to set FRONTEND_DEPLOY_URL on frontend"
-            log "✓ FRONTEND_DEPLOY_URL ensured: $FRONTEND_DEPLOY_URL"
+        fi
+        
+        # Frontend service: batch set both REFLEX_API_URL and FRONTEND_DEPLOY_URL in ONE command
+        local frontend_vars=()
+        [ -n "$BACKEND_DOMAIN" ] && frontend_vars+=("--set" "REFLEX_API_URL=$REFLEX_API_URL")
+        [ -n "$FRONTEND_DOMAIN" ] && frontend_vars+=("--set" "FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL")
+        
+        if [ ${#frontend_vars[@]} -gt 0 ]; then
+            log "Setting URL variables for frontend in a single command..."
+            railway variables --service "$FRONTEND_NAME" "${frontend_vars[@]}" >/dev/null 2>&1 || warn "Failed to set URL variables on frontend"
+            log "✓ URL variables ensured: REFLEX_API_URL=$REFLEX_API_URL, FRONTEND_DEPLOY_URL=$FRONTEND_DEPLOY_URL"
         fi
         
         # Deploy services normally

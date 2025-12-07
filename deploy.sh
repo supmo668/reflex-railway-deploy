@@ -136,38 +136,52 @@ create_service_if_needed() {
     fi
 }
 
-# Function to set environment variables on a service
+# Function to set environment variables on a service (BATCHED to avoid rate limits)
 set_service_vars() {
     local service_name=$1
     local is_frontend=$2
     
     log "Setting environment variables for $service_name..."
     
+    # Build array of all variables to set in ONE command
+    local var_args=()
+    
     # Database URL
     if [ -n "$DB_URL" ]; then
-        railway variables --service "$service_name" --set "DB_URL=$DB_URL" || warn "Failed to set DB_URL"
-        railway variables --service "$service_name" --set "DATABASE_URL=$DB_URL" || warn "Failed to set DATABASE_URL"
+        var_args+=("--set" "DB_URL=$DB_URL")
+        var_args+=("--set" "DATABASE_URL=$DB_URL")
     fi
     
     # Deployment URLs
-    railway variables --service "$service_name" --set "REFLEX_API_URL=$BACKEND_URL" || true
-    railway variables --service "$service_name" --set "FRONTEND_DEPLOY_URL=$FRONTEND_URL" || true
+    var_args+=("--set" "REFLEX_API_URL=$BACKEND_URL")
+    var_args+=("--set" "FRONTEND_DEPLOY_URL=$FRONTEND_URL")
     
     # Port configuration
     if [ "$is_frontend" = true ]; then
-        railway variables --service "$service_name" --set "PORT=3000" || true
+        var_args+=("--set" "PORT=3000")
     else
-        railway variables --service "$service_name" --set "PORT=8000" || true
+        var_args+=("--set" "PORT=8000")
     fi
     
-    # Set additional app-specific variables from APP_ENV_VARS
+    # Add app-specific variables from APP_ENV_VARS
     if [ -n "$APP_ENV_VARS" ]; then
         for var in $APP_ENV_VARS; do
             value="${!var}"
             if [ -n "$value" ]; then
-                railway variables --service "$service_name" --set "$var=$value" || warn "Failed to set $var"
+                var_args+=("--set" "$var=$value")
             fi
         done
+    fi
+    
+    # Set ALL variables in a SINGLE command to avoid triggering multiple deployments
+    if [ ${#var_args[@]} -gt 0 ]; then
+        local var_count=$((${#var_args[@]} / 2))
+        log "Setting $var_count variables in a single command..."
+        if railway variables --service "$service_name" "${var_args[@]}"; then
+            log "✓ All variables set for $service_name"
+        else
+            warn "Failed to set some variables for $service_name"
+        fi
     fi
 }
 

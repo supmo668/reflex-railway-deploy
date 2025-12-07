@@ -1,8 +1,9 @@
 #!/bin/bash
 # set_railway_vars.sh - Set Railway environment variables from .env file
 # Usage: ./set_railway_vars.sh -s SERVICE [-f FILE] [-e EXCLUDE_VARS]
-
-# Remove set -e to continue processing all variables even if some fail
+#
+# IMPORTANT: This script batches all variables into a SINGLE railway variables command
+# to avoid triggering multiple deployments and hitting rate limits.
 
 # Defaults
 SERVICE="" ENV_FILE=".env" EXCLUDE_VARS=""
@@ -35,18 +36,14 @@ is_excluded() {
     return 1
 }
 
-echo "Setting variables for $SERVICE from $ENV_FILE..."
+echo "Collecting variables for $SERVICE from $ENV_FILE..."
 [ -n "$EXCLUDE_VARS" ] && echo "Excluding: $EXCLUDE_VARS"
 
-# Process .env file line by line
-success_count=0
-error_count=0
+# Collect all variables into an array for batched setting
+declare -a VAR_ARGS=()
 skipped_count=0
 
 while IFS= read -r line || [ -n "$line" ]; do
-    # Debug: show line being processed
-    # echo "DEBUG: Processing line: '$line'"
-    
     # Skip empty lines and comments
     [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
     
@@ -63,12 +60,9 @@ while IFS= read -r line || [ -n "$line" ]; do
     # Skip if variable name is empty
     [[ -z "$var_name" ]] && continue
     
-    # Debug: show extracted variable
-    # echo "DEBUG: Extracted var_name='$var_name', var_value='${var_value:0:20}...'"
-    
     # Check if variable should be excluded
     if is_excluded "$var_name"; then
-        echo "Skipping: $var_name"
+        echo "  Skipping: $var_name"
         ((skipped_count++))
         continue
     fi
@@ -76,20 +70,29 @@ while IFS= read -r line || [ -n "$line" ]; do
     # Remove quotes from value if present
     var_value=$(echo "$var_value" | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/")
     
-    # Set variable in Railway
-    echo "Setting: $var_name"
-    if railway_output=$(railway variables --service "$SERVICE" --set "$var_name=$var_value" 2>&1); then
-        echo "✓ $var_name"
-        ((success_count++))
-    else
-        echo "✗ $var_name (Error: $railway_output)"
-        ((error_count++))
-        # Continue processing other variables instead of exiting
-    fi
+    # Add to batch array
+    VAR_ARGS+=("--set" "$var_name=$var_value")
+    echo "  Collected: $var_name"
     
 done < "$ENV_FILE"
 
+# Set all variables in a single Railway command (triggers only ONE deployment)
+var_count=${#VAR_ARGS[@]}
+var_count=$((var_count / 2))  # Each var has --set and value
+
+if [ ${#VAR_ARGS[@]} -gt 0 ]; then
+    echo ""
+    echo "Setting $var_count variables for $SERVICE in a single command..."
+    if railway_output=$(railway variables --service "$SERVICE" "${VAR_ARGS[@]}" 2>&1); then
+        echo "✓ Successfully set $var_count variables"
+    else
+        echo "✗ Failed to set variables: $railway_output"
+        exit 1
+    fi
+else
+    echo "No variables to set"
+fi
+
 # Summary
-echo "Complete: $success_count set, $skipped_count skipped, $error_count failed"
-[ $error_count -gt 0 ] && exit 1
+echo "Complete: $var_count set, $skipped_count skipped"
 exit 0
