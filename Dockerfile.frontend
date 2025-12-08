@@ -28,8 +28,11 @@ RUN uv sync --frozen
 # Copy the rest of the application
 COPY . .
 
-# Expose the port that Reflex runs on
-EXPOSE 8000
+# Set default PORT for frontend
+ENV PORT=3000
 
-# Command to run the application
+# Expose the port that Reflex frontend runs on
+EXPOSE 3000
+
+# Command to run the frontend
 CMD ["uv", "run", "reflex", "run", "--env", "prod", "--frontend-only"]

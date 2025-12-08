@@ -28,8 +28,11 @@ RUN uv sync --frozen
 # Copy the rest of the application
 COPY . .
 
-# Expose the port that Reflex runs on
+# Set default PORT (Railway overrides this)
+ENV PORT=8000
+
+# Expose the port that Reflex backend runs on
 EXPOSE 8000
 
-# Command to run the application
+# Command to run the backend
 CMD ["uv", "run", "reflex", "run", "--env", "prod", "--backend-only"]

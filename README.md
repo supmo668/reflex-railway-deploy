@@ -10,7 +10,7 @@ This directory contains reusable deployment scripts and Dockerfiles for deployin
 
 | File | Description |
 |------|-------------|
-| `deploy.sh` | Generic deployment script (no hardcoded values) |
+| `deploy_all.sh` | Main deployment script (no hardcoded values) |
 | `Dockerfile.backend` | Backend service Dockerfile |
 | `Dockerfile.frontend` | Frontend service Dockerfile |
 
@@ -18,85 +18,112 @@ This directory contains reusable deployment scripts and Dockerfiles for deployin
 
 ```bash
 # Deploy using the generic script
-./reflex-railway-deploy/deploy.sh \
+./reflex-railway-deploy/deploy_all.sh \
     -p YOUR_PROJECT \
     -e YOUR_ENVIRONMENT \
     -b YOUR_BACKEND_SERVICE \
-    -f YOUR_FRONTEND_SERVICE
+    -n YOUR_FRONTEND_SERVICE \
+    --skip-db \
+    -y
 ```
 
 ## Usage
 
 ```
-Usage: deploy.sh [OPTIONS]
+Usage: deploy_all.sh [OPTIONS]
 
 Required Options:
   -p, --project PROJECT       Railway project name
   -e, --environment ENV       Railway environment (e.g., test, production)
   -b, --backend SERVICE       Backend service name
-  -f, --frontend SERVICE      Frontend service name
+  -n, --frontend SERVICE      Frontend service name
 
 Optional Options:
   -d, --deploy-dir DIR        Deploy directory with Dockerfiles (default: reflex-railway-deploy)
-      --env-file FILE         Environment file to source (default: .env)
-      --skip-db               Skip PostgreSQL service lookup
-      --postgres-service NAME Name of PostgreSQL service (default: Postgres)
+  -t, --team TEAM             Railway team (for team projects)
+      --skip-db               Skip PostgreSQL service setup (for demo mode)
+  -y, --yes                   Auto mode (skip confirmation pauses)
   -h, --help                  Show this help message
 ```
 
-## Environment Variables
+## URL Configuration
 
-### Automatic Variables
-
-The deployment script automatically sets these on Railway services:
-
-| Variable | Description |
-|----------|-------------|
-| `REFLEX_DB_URL` | PostgreSQL connection URL (from Railway Postgres service) |
-| `REFLEX_API_URL` | Backend URL for frontend to call API |
-| `REFLEX_DEPLOY_URL` | Frontend URL for CORS configuration |
-| `PORT` | Service port (8000 for backend, 3000 for frontend) |
-
-### App-Specific Variables
-
-Set `APP_ENV_VARS` to a space-separated list of environment variable names to sync to Railway:
-
-```bash
-export APP_ENV_VARS="APP_NAME CLINIC_NAME SECRET_KEY"
-export APP_NAME="My App"
-export CLINIC_NAME="My Clinic"
-export SECRET_KEY="super-secret"
-
-./reflex-railway-deploy/deploy.sh -p myproject -e test -b api -f web
-```
-
-## Railway URL Convention
+### Railway URL Convention
 
 Railway generates public URLs in this format:
 ```
 https://<service-name>-<environment>.up.railway.app
 ```
 
-For example:
+For example with `--backend myapp-backend --frontend myapp -e test`:
 - Backend: `https://myapp-backend-test.up.railway.app`
 - Frontend: `https://myapp-test.up.railway.app`
 
+### Environment Variables Per Service
+
+The deploy script automatically sets these variables based on service names:
+
+**Backend Service:**
+| Variable | Value | Description |
+|----------|-------|-------------|
+| `REFLEX_API_URL` | `http://localhost:8000` | Backend talks to itself locally |
+| `REFLEX_DEPLOY_URL` | `https://<backend>-<env>.up.railway.app` | Backend's public URL |
+| `CORS_ALLOWED_ORIGINS` | `https://<frontend>-<env>.up.railway.app` | Frontend URL for CORS |
+
+**Frontend Service:**
+| Variable | Value | Description |
+|----------|-------|-------------|
+| `REFLEX_API_URL` | `https://<backend>-<env>.up.railway.app` | Backend URL for API/WebSocket |
+| `REFLEX_DEPLOY_URL` | `https://<frontend>-<env>.up.railway.app` | Frontend's own public URL |
+
+### Internal Railway Communication
+
+For service-to-service communication within Railway, you can use the internal URL:
+```
+<service-name>.railway.internal
+```
+
+## Environment Files
+
+The script loads environment files from the `envs/` directory:
+```
+envs/
+├── .env.base      # Shared config (app name, theme, etc.)
+├── .env.prod      # Production settings (loaded for Railway)
+└── .env.secrets   # API keys (gitignored)
+```
+
+### App-Specific Variables
+
+Set `APP_ENV_VARS` to a comma-separated list of variable names to sync:
+
+```bash
+export APP_ENV_VARS="APP_NAME,CLINIC_NAME,THEME_COLOR"
+```
+
 ## Creating an App-Specific Wrapper
 
-For convenience, create an app-specific script in your project's `scripts/` directory:
+Create an app-specific script in your project's `scripts/` directory:
 
 ```bash
 #!/bin/bash
 # scripts/deploy_myapp.sh
+set -e
 
-export APP_ENV_VARS="APP_NAME SECRET_KEY"
-export APP_NAME="My Application"
+RAILWAY_PROJECT="my-project"
+RAILWAY_ENVIRONMENT="${1:-test}"
+BACKEND_SERVICE="myapp-backend"
+FRONTEND_SERVICE="myapp"
 
-./reflex-railway-deploy/deploy.sh \
-    -p myproject \
-    -e "${1:-test}" \
-    -b myapp-backend \
-    -f myapp
+export APP_ENV_VARS="APP_NAME,SECRET_KEY"
+
+./reflex-railway-deploy/deploy_all.sh \
+    -p "$RAILWAY_PROJECT" \
+    -e "$RAILWAY_ENVIRONMENT" \
+    -b "$BACKEND_SERVICE" \
+    -n "$FRONTEND_SERVICE" \
+    --skip-db \
+    -y
 ```
 
 Then deploy with:

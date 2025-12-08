@@ -49,7 +49,6 @@ API_URL = os.getenv("REFLEX_API_URL", os.getenv("API_URL", "http://localhost:800
 FRONTEND_URL = (
     os.getenv("REFLEX_DEPLOY_URL")  # Reflex convention (preferred)
     or os.getenv("RAILWAY_PUBLIC_DOMAIN")  # Railway auto-generated domain
-    or os.getenv("DEPLOY_URL")  # Legacy fallback
     or "http://localhost:3000"  # Development default
 )
 # Ensure FRONTEND_URL starts with http or https
