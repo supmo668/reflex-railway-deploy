@@ -6,6 +6,8 @@ Generic deployment template for Reflex applications on Railway using Docker.
 
 This directory contains reusable deployment scripts and Dockerfiles for deploying any Reflex application to Railway. All app-specific configuration is passed via arguments or environment variables - **no hardcoded values**.
 
+**Security Feature**: The backend service is NOT publicly exposed. Frontend communicates with backend via Railway's internal network.
+
 ## Files
 
 | File | Description |
@@ -46,42 +48,47 @@ Optional Options:
   -h, --help                  Show this help message
 ```
 
-## URL Configuration
+## URL Configuration (Security Best Practice)
 
-### Railway URL Convention
+### Architecture
 
-Railway generates public URLs in this format:
+```mermaid
+graph LR
+    Browser[User Browser] <-->|HTTPS| Frontend[Frontend<br/>public URL]
+    Frontend <-->|Internal Network| Backend[Backend<br/>internal only]
+    
+    style Frontend fill:#90EE90
+    style Backend fill:#FFB6C1
 ```
-https://<service-name>-<environment>.up.railway.app
-```
-
-For example with `--backend myapp-backend --frontend myapp -e test`:
-- Backend: `https://myapp-backend-test.up.railway.app`
-- Frontend: `https://myapp-test.up.railway.app`
 
 ### Environment Variables Per Service
 
-The deploy script automatically sets these variables based on service names:
+The deploy script automatically sets these variables:
 
-**Backend Service:**
+**Backend Service (NOT publicly exposed):**
 | Variable | Value | Description |
 |----------|-------|-------------|
-| `REFLEX_API_URL` | `http://localhost:8000` | Backend talks to itself locally |
-| `REFLEX_DEPLOY_URL` | `https://<backend>-<env>.up.railway.app` | Backend's public URL |
+| `REFLEX_API_URL` | *(not set)* | Defaults to `http://localhost:8000` |
+| `REFLEX_DEPLOY_URL` | *(not set)* | Defaults to `http://localhost:8000` |
 | `CORS_ALLOWED_ORIGINS` | `https://<frontend>-<env>.up.railway.app` | Frontend URL for CORS |
 
-**Frontend Service:**
+**Frontend Service (publicly accessible):**
 | Variable | Value | Description |
 |----------|-------|-------------|
-| `REFLEX_API_URL` | `https://<backend>-<env>.up.railway.app` | Backend URL for API/WebSocket |
-| `REFLEX_DEPLOY_URL` | `https://<frontend>-<env>.up.railway.app` | Frontend's own public URL |
+| `REFLEX_API_URL` | `http://<backend>.railway.internal:8000` | Internal backend URL |
+| `REFLEX_DEPLOY_URL` | `https://<frontend>-<env>.up.railway.app` | Frontend's public URL |
 
-### Internal Railway Communication
+### Railway Internal Networking
 
-For service-to-service communication within Railway, you can use the internal URL:
+Railway provides internal DNS for service-to-service communication:
 ```
-<service-name>.railway.internal
+http://<service-name>.railway.internal:<port>
 ```
+
+Benefits:
+- **Security**: Backend is not exposed to the public internet
+- **Performance**: Lower latency within Railway's network
+- **Cost**: No egress charges for internal traffic
 
 ## Environment Files
 
@@ -155,8 +162,7 @@ Same dependencies as backend.
 
 1. **Railway CLI**: Install with `npm i -g @railway/cli`
 2. **Railway Login**: Run `railway login`
-3. **PostgreSQL Service**: Create a Postgres service named "Postgres" in your Railway project
-4. **jq**: Required for JSON parsing (`apt install jq` or `brew install jq`)
+3. **jq**: Required for JSON parsing (`apt install jq` or `brew install jq`)
 
 ## Troubleshooting
 
@@ -164,9 +170,10 @@ Same dependencies as backend.
 - Ensure you're logged into Railway: `railway whoami`
 - Check project exists: `railway list`
 
-### Database URL Not Found
-- Ensure PostgreSQL service is named "Postgres" (or use `--postgres-service NAME`)
-- Check service is deployed and running
+### WebSocket Connection Fails
+- Ensure frontend's `REFLEX_API_URL` points to internal backend URL
+- Check backend is running: `railway logs --service <backend-name>`
+- Verify internal DNS: `http://<backend>.railway.internal:8000`
 
 ### Build Fails
 - Check Dockerfile has all required system dependencies
@@ -176,4 +183,5 @@ Same dependencies as backend.
 ## Additional Resources
 
 - [Railway Documentation](https://docs.railway.app/)
+- [Railway Private Networking](https://docs.railway.app/reference/private-networking)
 - [Reflex Documentation](https://reflex.dev/docs/)

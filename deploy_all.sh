@@ -70,16 +70,18 @@ run_migrations() {
 # ╚═══════════════════════════════════════════════════════════════════╝
 # Build --set args from APP_ENV_VARS + derived vars
 # =============================================================================
-# URL Configuration (Single Source of Truth):
+# URL Configuration (Security Best Practice - Internal Networking):
 # =============================================================================
-# Backend Service:
-#   REFLEX_API_URL = http://localhost:8000 (backend talks to itself locally)
-#   REFLEX_DEPLOY_URL = https://<backend-name>-<env>.up.railway.app (public URL)
-#   CORS_ALLOWED_ORIGINS = frontend public URL (for CORS)
+# Backend Service (NO public domain required):
+#   - No REFLEX_API_URL needed (defaults to http://localhost:8000)
+#   - No REFLEX_DEPLOY_URL needed (defaults to http://localhost:8000)
+#   - CORS_ALLOWED_ORIGINS = frontend public URL
 #
 # Frontend Service:
-#   REFLEX_API_URL = https://<backend-name>-<env>.up.railway.app (or internal URL)
-#   REFLEX_DEPLOY_URL = https://<frontend-name>-<env>.up.railway.app (own URL)
+#   - REFLEX_API_URL = http://<backend>.railway.internal:8000 (internal URL)
+#   - REFLEX_DEPLOY_URL = https://<frontend>-<env>.up.railway.app (public URL)
+#
+# This setup keeps the backend unexposed to the public internet.
 # =============================================================================
 build_var_args() {
     local service=$1
@@ -106,17 +108,15 @@ build_var_args() {
     
     # Service-specific URL configuration
     if [ "$service" = "$FRONTEND_NAME" ]; then
-        # Frontend: REFLEX_API_URL = backend public URL (for WebSocket/API calls)
-        [ -n "$BACKEND_PUBLIC_URL" ] && VAR_ARGS+=("--set" "REFLEX_API_URL=$BACKEND_PUBLIC_URL")
+        # Frontend: REFLEX_API_URL = backend INTERNAL URL (secure, not exposed)
+        [ -n "$BACKEND_INTERNAL_URL" ] && VAR_ARGS+=("--set" "REFLEX_API_URL=$BACKEND_INTERNAL_URL")
         # Frontend: REFLEX_DEPLOY_URL = frontend's OWN public URL
         [ -n "$FRONTEND_PUBLIC_URL" ] && VAR_ARGS+=("--set" "REFLEX_DEPLOY_URL=$FRONTEND_PUBLIC_URL")
     fi
     
     if [ "$service" = "$BACKEND_NAME" ]; then
-        # Backend: REFLEX_API_URL = localhost (backend talks to itself)
-        VAR_ARGS+=("--set" "REFLEX_API_URL=http://localhost:8000")
-        # Backend: REFLEX_DEPLOY_URL = backend's OWN public URL
-        [ -n "$BACKEND_PUBLIC_URL" ] && VAR_ARGS+=("--set" "REFLEX_DEPLOY_URL=$BACKEND_PUBLIC_URL")
+        # Backend: No REFLEX_API_URL or REFLEX_DEPLOY_URL needed
+        # Defaults to http://localhost:8000 (see rxconfig.py)
         # Backend: CORS_ALLOWED_ORIGINS = frontend public URL
         [ -n "$FRONTEND_PUBLIC_URL" ] && VAR_ARGS+=("--set" "CORS_ALLOWED_ORIGINS=$FRONTEND_PUBLIC_URL")
     fi
@@ -152,17 +152,15 @@ set_vars_and_deploy() {
     success "$service deployed"
 }
 
-# Update URL variables after deployment (fetch from Railway if domains differ)
+# Update URL variables after deployment (fetch frontend domain from Railway)
 update_urls() {
-    local backend_domain frontend_domain
-    backend_domain=$(railway variables --service "$BACKEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
+    local frontend_domain
     frontend_domain=$(railway variables --service "$FRONTEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
     
-    # Update URLs if Railway provided different domains
-    [ -n "$backend_domain" ] && BACKEND_PUBLIC_URL="https://$backend_domain"
+    # Update frontend URL if Railway provided different domain
     [ -n "$frontend_domain" ] && FRONTEND_PUBLIC_URL="https://$frontend_domain"
     
-    log "Backend Public URL: $BACKEND_PUBLIC_URL"
+    log "Backend Internal URL: $BACKEND_INTERNAL_URL"
     log "Frontend Public URL: $FRONTEND_PUBLIC_URL"
 }
 
@@ -184,7 +182,13 @@ create_service() {
     service_exists "$service" && { success "$service exists"; return 0; }
     header "Creating $service"
     railway add --service "$service" -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" ${RAILWAY_TEAM:+-t "$RAILWAY_TEAM"} || error "Failed to create $service"
-    railway domain --service "$service" >/dev/null 2>&1 || true
+    # Only add public domain for frontend (backend stays internal for security)
+    if [ "$service" = "$FRONTEND_NAME" ]; then
+        railway domain --service "$service" >/dev/null 2>&1 || true
+        log "Public domain added for $service"
+    else
+        log "No public domain for $service (internal only)"
+    fi
     success "$service created"
 }
 
@@ -236,7 +240,7 @@ deploy() {
     
     # Summary
     header "Deployment Complete"
-    echo "✓ Backend:  $BACKEND_PUBLIC_URL"
+    echo "✓ Backend:  $BACKEND_INTERNAL_URL (internal only - not publicly exposed)"
     echo "✓ Frontend: $FRONTEND_PUBLIC_URL"
     [ "$SKIP_DB" = true ] && echo "✓ Database: Skipped (demo mode)"
 }
@@ -319,13 +323,13 @@ fi
 [ "$IS_DEMO" = "true" ] && SKIP_DB=true
 
 # =============================================================================
-# Derive public URLs from service names and environment
-# Convention: https://<service-name>-<environment>.up.railway.app
+# Derive URLs from service names and environment
+# Security: Backend uses internal URL only (not publicly exposed)
 # =============================================================================
-BACKEND_PUBLIC_URL="https://${BACKEND_NAME}-${RAILWAY_ENVIRONMENT}.up.railway.app"
+# Internal Railway URL for backend (service-to-service, port 8000)
+BACKEND_INTERNAL_URL="http://${BACKEND_NAME}.railway.internal:8000"
+# Public URL only for frontend
 FRONTEND_PUBLIC_URL="https://${FRONTEND_NAME}-${RAILWAY_ENVIRONMENT}.up.railway.app"
-# Internal Railway URL (for service-to-service communication)
-BACKEND_INTERNAL_URL="${BACKEND_NAME}.railway.internal"
 
 # Show config
 header "Railway Deployment"
@@ -333,8 +337,7 @@ echo "Project: $RAILWAY_PROJECT | Env: $RAILWAY_ENVIRONMENT"
 echo "Backend: $BACKEND_NAME | Frontend: $FRONTEND_NAME"
 [ -n "$RAILWAY_TEAM" ] && echo "Team: $RAILWAY_TEAM"
 [ "$SKIP_DB" = true ] && echo "Database: SKIPPED (demo mode)"
-echo "Backend Public URL: $BACKEND_PUBLIC_URL"
-echo "Backend Internal URL: $BACKEND_INTERNAL_URL"
+echo "Backend Internal URL: $BACKEND_INTERNAL_URL (not publicly exposed)"
 echo "Frontend Public URL: $FRONTEND_PUBLIC_URL"
 
 # Run deployment
