@@ -108,8 +108,8 @@ build_var_args() {
     
     # Service-specific URL configuration
     if [ "$service" = "$FRONTEND_NAME" ]; then
-        # Frontend: REFLEX_API_URL = backend INTERNAL URL (secure, not exposed)
-        [ -n "$BACKEND_INTERNAL_URL" ] && VAR_ARGS+=("--set" "REFLEX_API_URL=$BACKEND_INTERNAL_URL")
+        # Frontend: REFLEX_API_URL = backend PUBLIC URL (required for client-side access)
+        [ -n "$BACKEND_PUBLIC_URL" ] && VAR_ARGS+=("--set" "REFLEX_API_URL=$BACKEND_PUBLIC_URL")
         # Frontend: REFLEX_DEPLOY_URL = frontend's OWN public URL
         [ -n "$FRONTEND_PUBLIC_URL" ] && VAR_ARGS+=("--set" "REFLEX_DEPLOY_URL=$FRONTEND_PUBLIC_URL")
     fi
@@ -155,12 +155,16 @@ set_vars_and_deploy() {
 # Update URL variables after deployment (fetch frontend domain from Railway)
 update_urls() {
     local frontend_domain
+    local backend_domain
+    
     frontend_domain=$(railway variables --service "$FRONTEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
+    backend_domain=$(railway variables --service "$BACKEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
     
-    # Update frontend URL if Railway provided different domain
+    # Update URLs if Railway provided different domains
     [ -n "$frontend_domain" ] && FRONTEND_PUBLIC_URL="https://$frontend_domain"
+    [ -n "$backend_domain" ] && BACKEND_PUBLIC_URL="https://$backend_domain"
     
-    log "Backend Internal URL: $BACKEND_INTERNAL_URL"
+    log "Backend Public URL: $BACKEND_PUBLIC_URL"
     log "Frontend Public URL: $FRONTEND_PUBLIC_URL"
 }
 
@@ -182,13 +186,11 @@ create_service() {
     service_exists "$service" && { success "$service exists"; return 0; }
     header "Creating $service"
     railway add --service "$service" -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" ${RAILWAY_TEAM:+-t "$RAILWAY_TEAM"} || error "Failed to create $service"
-    # Only add public domain for frontend (backend stays internal for security)
-    if [ "$service" = "$FRONTEND_NAME" ]; then
-        railway domain --service "$service" >/dev/null 2>&1 || true
-        log "Public domain added for $service"
-    else
-        log "No public domain for $service (internal only)"
-    fi
+    
+    # Add public domain for both services
+    railway domain --service "$service" >/dev/null 2>&1 || true
+    log "Public domain added for $service"
+    
     success "$service created"
 }
 
@@ -324,11 +326,10 @@ fi
 
 # =============================================================================
 # Derive URLs from service names and environment
-# Security: Backend uses internal URL only (not publicly exposed)
 # =============================================================================
-# Internal Railway URL for backend (service-to-service, port 8000)
-BACKEND_INTERNAL_URL="http://${BACKEND_NAME}.railway.internal:8000"
-# Public URL only for frontend
+# Public URL for backend (required for client-side frontend to connect)
+BACKEND_PUBLIC_URL="https://${BACKEND_NAME}-${RAILWAY_ENVIRONMENT}.up.railway.app"
+# Public URL for frontend
 FRONTEND_PUBLIC_URL="https://${FRONTEND_NAME}-${RAILWAY_ENVIRONMENT}.up.railway.app"
 
 # Show config
@@ -337,7 +338,7 @@ echo "Project: $RAILWAY_PROJECT | Env: $RAILWAY_ENVIRONMENT"
 echo "Backend: $BACKEND_NAME | Frontend: $FRONTEND_NAME"
 [ -n "$RAILWAY_TEAM" ] && echo "Team: $RAILWAY_TEAM"
 [ "$SKIP_DB" = true ] && echo "Database: SKIPPED (demo mode)"
-echo "Backend Internal URL: $BACKEND_INTERNAL_URL (not publicly exposed)"
+echo "Backend Public URL: $BACKEND_PUBLIC_URL"
 echo "Frontend Public URL: $FRONTEND_PUBLIC_URL"
 
 # Run deployment
