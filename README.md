@@ -4,101 +4,103 @@ Generic deployment template for Reflex applications on Railway using Docker.
 
 ## Overview
 
-This directory contains reusable deployment scripts and Dockerfiles for deploying any Reflex application to Railway. All app-specific configuration is passed via arguments or environment variables - **no hardcoded values**.
+This directory contains modular, reusable deployment scripts for deploying any Reflex application to Railway. The scripts are designed for CI/CD pipelines with no human interaction required.
 
-**Security Feature**: The backend service is NOT publicly exposed. Frontend communicates with backend via Railway's internal network.
+**Key Features:**
+- Modular shell functions in `functions/` for testability
+- Hierarchical environment loading (base → env-specific → secrets)
+- Automatic URL configuration for frontend/backend communication
+- Backend-only secret syncing (API keys never sent to frontend)
+- Default to `test` environment for safety
 
-## Files
+## Directory Structure
 
-| File | Description |
-|------|-------------|
-| `deploy_all.sh` | Main deployment script (no hardcoded values) |
-| `Dockerfile.backend` | Backend service Dockerfile |
-| `Dockerfile.frontend` | Frontend service Dockerfile |
+```
+reflex-railway-deploy/
+├── deploy_all.sh              # Main deployment orchestrator
+├── Dockerfile.backend         # Backend service Dockerfile  
+├── Dockerfile.frontend        # Frontend service Dockerfile
+└── functions/
+    ├── logging.sh             # Color logging utilities
+    ├── env.sh                 # Environment loading & variable building
+    ├── railway.sh             # Railway CLI wrappers
+    └── deploy.sh              # Service deployment logic
+```
 
 ## Quick Start
 
 ```bash
-# Deploy using the generic script
-./reflex-railway-deploy/deploy_all.sh \
-    -p YOUR_PROJECT \
-    -e YOUR_ENVIRONMENT \
-    -b YOUR_BACKEND_SERVICE \
-    -n YOUR_FRONTEND_SERVICE \
-    --skip-db \
-    -y
+# Deploy to test environment (default)
+./reflex-railway-deploy/deploy_all.sh -p my-project
+
+# Deploy to production
+APP_ENV=prod ./reflex-railway-deploy/deploy_all.sh -p my-project -e prod
+
+# CI/CD with token
+RAILWAY_TOKEN=xxx ./reflex-railway-deploy/deploy_all.sh -p my-project -e test
 ```
 
 ## Usage
 
 ```
-Usage: deploy_all.sh [OPTIONS]
+Usage: deploy_all.sh -p PROJECT [OPTIONS]
 
-Required Options:
-  -p, --project PROJECT       Railway project name
-  -e, --environment ENV       Railway environment (e.g., test, production)
-  -b, --backend SERVICE       Backend service name
-  -n, --frontend SERVICE      Frontend service name
+Required:
+  -p, --project PROJECT     Railway project ID/name
 
-Optional Options:
-  -d, --deploy-dir DIR        Deploy directory with Dockerfiles (default: reflex-railway-deploy)
-  -t, --team TEAM             Railway team (for team projects)
-      --skip-db               Skip PostgreSQL service setup (for demo mode)
-  -y, --yes                   Auto mode (skip confirmation pauses)
-  -h, --help                  Show this help message
+Optional:
+  -t, --team TEAM           Railway team (default: personal)
+  -e, --environment ENV     Railway environment (default: test)
+  -b, --backend NAME        Backend service name (default: backend)
+  -n, --frontend NAME       Frontend service name (default: frontend)
+  --skip-db                 Skip PostgreSQL setup and migrations
+  -h, --help                Show this help
+
+Environment:
+  APP_ENV                   Controls which .env.{APP_ENV} file is loaded (default: test)
+  RAILWAY_TOKEN             Railway API token (required for CI/CD)
+  APP_ENV_VARS              Comma-separated list of additional env vars to sync
 ```
-
-## URL Configuration (Security Best Practice)
-
-### Architecture
-
-```mermaid
-graph LR
-    Browser[User Browser] <-->|HTTPS| Frontend[Frontend<br/>public URL]
-    Frontend <-->|Internal Network| Backend[Backend<br/>internal only]
-    
-    style Frontend fill:#90EE90
-    style Backend fill:#FFB6C1
-```
-
-### Environment Variables Per Service
-
-The deploy script automatically sets these variables:
-
-**Backend Service (NOT publicly exposed):**
-| Variable | Value | Description |
-|----------|-------|-------------|
-| `REFLEX_API_URL` | *(not set)* | Defaults to `http://localhost:8000` |
-| `REFLEX_DEPLOY_URL` | *(not set)* | Defaults to `http://localhost:8000` |
-| `CORS_ALLOWED_ORIGINS` | `https://<frontend>-<env>.up.railway.app` | Frontend URL for CORS |
-
-**Frontend Service (publicly accessible):**
-| Variable | Value | Description |
-|----------|-------|-------------|
-| `REFLEX_API_URL` | `http://<backend>.railway.internal:8000` | Internal backend URL |
-| `REFLEX_DEPLOY_URL` | `https://<frontend>-<env>.up.railway.app` | Frontend's public URL |
-
-### Railway Internal Networking
-
-Railway provides internal DNS for service-to-service communication:
-```
-http://<service-name>.railway.internal:<port>
-```
-
-Benefits:
-- **Security**: Backend is not exposed to the public internet
-- **Performance**: Lower latency within Railway's network
-- **Cost**: No egress charges for internal traffic
 
 ## Environment Files
 
-The script loads environment files from the `envs/` directory:
+The script loads environment files from `envs/` in this order:
+
 ```
 envs/
 ├── .env.base      # Shared config (app name, theme, etc.)
-├── .env.prod      # Production settings (loaded for Railway)
-└── .env.secrets   # API keys (gitignored)
+├── .env.test      # Test environment settings
+├── .env.prod      # Production environment settings
+└── .env.secrets   # API keys (gitignored, never committed)
 ```
+
+**Load order:** `.env.base` → `.env.{APP_ENV}` → `.env.secrets`
+
+### Environment Variables Synced to Railway
+
+**Backend Service (receives secrets):**
+- `APP_ENV`, `IS_DEMO`, `LOGLEVEL`
+- `REFLEX_DB_URL` (if not skipped)
+- `OPENAI_API_KEY`, `CALL_API_TOKEN` (from .env.secrets)
+- `REFLEX_DEPLOY_URL`, `CORS_ALLOWED_ORIGINS`
+- Custom vars from `APP_ENV_VARS`
+
+**Frontend Service (no secrets):**
+- `APP_ENV`, `IS_DEMO`, `LOGLEVEL`
+- `REFLEX_API_URL` (backend URL)
+- `REFLEX_DEPLOY_URL`
+- Custom vars from `APP_ENV_VARS`
+
+## URL Configuration
+
+Railway automatically generates public URLs: `https://{service}-{environment}.up.railway.app`
+
+| Service | Variable | Value |
+|---------|----------|-------|
+| Backend | `REFLEX_DEPLOY_URL` | `https://{backend}-{env}.up.railway.app` |
+| Backend | `CORS_ALLOWED_ORIGINS` | `https://{frontend}-{env}.up.railway.app` |
+| Frontend | `REFLEX_API_URL` | `https://{backend}-{env}.up.railway.app` |
+| Frontend | `REFLEX_DEPLOY_URL` | `https://{frontend}-{env}.up.railway.app` |
 
 ### App-Specific Variables
 
@@ -122,47 +124,77 @@ RAILWAY_ENVIRONMENT="${1:-test}"
 BACKEND_SERVICE="myapp-backend"
 FRONTEND_SERVICE="myapp"
 
-export APP_ENV_VARS="APP_NAME,SECRET_KEY"
+# Map Railway environment to APP_ENV
+case "$RAILWAY_ENVIRONMENT" in
+    prod|production) export APP_ENV="prod" ;;
+    *)               export APP_ENV="test" ;;
+esac
 
-./reflex-railway-deploy/deploy_all.sh \
+# Additional app-specific variables to sync
+export APP_ENV_VARS="APP_NAME,THEME_COLOR"
+
+exec ./reflex-railway-deploy/deploy_all.sh \
     -p "$RAILWAY_PROJECT" \
     -e "$RAILWAY_ENVIRONMENT" \
     -b "$BACKEND_SERVICE" \
-    -n "$FRONTEND_SERVICE" \
-    --skip-db \
-    -y
+    -n "$FRONTEND_SERVICE"
 ```
 
-Then deploy with:
-```bash
-./scripts/deploy_myapp.sh              # Deploy to test
-./scripts/deploy_myapp.sh production   # Deploy to production
+## GitHub Actions Integration
+
+Create `.github/workflows/deploy.yml`:
+
+```yaml
+name: Deploy to Railway
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'test'
+        type: choice
+        options:
+          - test
+          - prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+      
+      - uses: astral-sh/setup-uv@v4
+      
+      - name: Install dependencies
+        run: uv sync
+      
+      - name: Make scripts executable
+        run: chmod +x scripts/*.sh reflex-railway-deploy/**/*.sh
+      
+      - name: Create secrets file
+        run: |
+          cat > envs/.env.secrets << EOF
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          CALL_API_TOKEN=${{ secrets.CALL_API_TOKEN }}
+          EOF
+      
+      - name: Deploy
+        run: ./scripts/deploy_myapp.sh ${{ inputs.environment }}
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 ```
-
-## Dockerfiles
-
-### Backend Dockerfile
-
-Runs `reflex run --env prod --backend-only` on port 8000.
-
-Includes:
-- Python 3.11
-- Build essentials (gcc, g++)
-- PostgreSQL client libraries
-- unzip, curl (for Reflex/bun)
-- uv package manager
-
-### Frontend Dockerfile
-
-Runs `reflex run --env prod --frontend-only` on port 3000.
-
-Same dependencies as backend.
 
 ## Prerequisites
 
 1. **Railway CLI**: Install with `npm i -g @railway/cli`
-2. **Railway Login**: Run `railway login`
+2. **Railway Login**: Run `railway login` (or set `RAILWAY_TOKEN` for CI/CD)
 3. **jq**: Required for JSON parsing (`apt install jq` or `brew install jq`)
+4. **uv**: Python package manager (`pip install uv`)
 
 ## Troubleshooting
 
@@ -171,17 +203,21 @@ Same dependencies as backend.
 - Check project exists: `railway list`
 
 ### WebSocket Connection Fails
-- Ensure frontend's `REFLEX_API_URL` points to internal backend URL
+- Ensure frontend's `REFLEX_API_URL` points to backend public URL
 - Check backend is running: `railway logs --service <backend-name>`
-- Verify internal DNS: `http://<backend>.railway.internal:8000`
 
 ### Build Fails
 - Check Dockerfile has all required system dependencies
 - Ensure `pyproject.toml` and `uv.lock` exist in project root
 - Check Railway logs: `railway logs --service <service-name>`
 
+### Secrets Not Working
+- Verify `.env.secrets` exists and has correct values
+- Check backend logs for missing env vars
+- Secrets are only synced to backend service
+
 ## Additional Resources
 
 - [Railway Documentation](https://docs.railway.app/)
-- [Railway Private Networking](https://docs.railway.app/reference/private-networking)
+- [Railway CLI Reference](https://docs.railway.app/reference/cli-api)
 - [Reflex Documentation](https://reflex.dev/docs/)

@@ -1,345 +1,136 @@
 #!/bin/bash
 # deploy_all.sh - Streamlined Railway deployment for Reflex applications
-# Handles both first-time and subsequent deployments with batched variable updates
+# Usage: ./deploy_all.sh -p PROJECT [OPTIONS]
+#
+# This script orchestrates the deployment of a Reflex app to Railway.
+# It uses modular functions from functions/ for reusability and testing.
+#
+# Environment files are loaded from envs/ in this order:
+#   1. envs/.env.base (shared config)
+#   2. envs/.env.{APP_ENV} (environment-specific)
+#   3. envs/.env.secrets (API keys - gitignored)
+#
+# Set APP_ENV to control which environment config is loaded (default: test)
+
 set -e
 
 # ╔═══════════════════════════════════════════════════════════════════╗
-# ║ CONFIGURATION & HELPERS                                           ║
+# ║ SCRIPT SETUP                                                       ║
 # ╚═══════════════════════════════════════════════════════════════════╝
-RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[1;33m' BLUE='\033[0;34m' NC='\033[0m'
-log()     { echo -e "${BLUE}[INFO]${NC} $1"; }
-success() { echo -e "${GREEN}[✓]${NC} $1"; }
-warn()    { echo -e "${YELLOW}[!]${NC} $1"; }
-error()   { echo -e "${RED}[✗]${NC} $1"; exit 1; }
-header()  { echo -e "\n${BLUE}═══ $1 ═══${NC}"; }
-pause()   { [ "$AUTO_MODE" = true ] || { echo -e "${YELLOW}Press ENTER to continue...${NC}"; read -r; }; }
 
-# ╔═══════════════════════════════════════════════════════════════════╗
-# ║ SERVICE DETECTION                                                  ║
-# ╚═══════════════════════════════════════════════════════════════════╝
-service_exists() {
-    local service=$1 cache="$DEPLOY_DIR/railway_services.json"
-    [ -f "$cache" ] || return 1
-    local env_id=$(jq -r --arg e "$RAILWAY_ENVIRONMENT" '.[] | .environments.edges[] | .node | select(.name == $e) | .id' "$cache" 2>/dev/null | head -1)
-    [ -z "$env_id" ] && return 1
-    jq -e --arg s "$service" --arg eid "$env_id" \
-        '.[] | .services.edges[] | .node | select(.name == $s) | select(.serviceInstances.edges[] | .node.environmentId == $eid)' \
-        "$cache" >/dev/null 2>&1
-}
+# Get the directory where this script lives
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEPLOY_DIR="$SCRIPT_DIR"
 
-check_services() {
-    header "Checking Services"
-    railway list --json > "$DEPLOY_DIR/railway_services.json" 2>/dev/null || echo "[]" > "$DEPLOY_DIR/railway_services.json"
-    
-    POSTGRES_EXISTS=false; BACKEND_EXISTS=false; FRONTEND_EXISTS=false
-    service_exists "Postgres" && POSTGRES_EXISTS=true
-    service_exists "$BACKEND_NAME" && BACKEND_EXISTS=true  
-    service_exists "$FRONTEND_NAME" && FRONTEND_EXISTS=true
-    
-    log "Postgres: $POSTGRES_EXISTS | Backend: $BACKEND_EXISTS | Frontend: $FRONTEND_EXISTS"
-}
-
-# ╔═══════════════════════════════════════════════════════════════════╗
-# ║ DATABASE                                                           ║
-# ╚═══════════════════════════════════════════════════════════════════╝
-get_db_url() {
-    # Skip if SKIP_DB is set
-    [ "$SKIP_DB" = true ] && { REFLEX_DB_URL=""; return 0; }
-    DATABASE_URL=$(railway variables --service "Postgres" --json 2>/dev/null | jq -r '.DATABASE_URL // empty' 2>/dev/null || echo "")
-    DATABASE_PUBLIC_URL=$(railway variables --service "Postgres" --json 2>/dev/null | jq -r '.DATABASE_PUBLIC_URL // empty' 2>/dev/null || echo "")
-    REFLEX_DB_URL="$DATABASE_URL"
-}
-
-run_migrations() {
-    # Skip if SKIP_DB is set
-    [ "$SKIP_DB" = true ] && { log "Database skipped (SKIP_DB=true)"; return 0; }
-    header "Database Migrations"
-    get_db_url
-    local url="${DATABASE_PUBLIC_URL:-$DATABASE_URL}"
-    [ -z "$url" ] && { warn "No database URL, skipping migrations"; return 0; }
-    
-    log "Running migrations..."
-    REFLEX_DB_URL="$url" uv run reflex db init 2>/dev/null || true
-    REFLEX_DB_URL="$url" uv run reflex db makemigrations 2>/dev/null || true
-    REFLEX_DB_URL="$url" uv run reflex db migrate || error "Migrations failed"
-    success "Migrations complete"
-}
-
-# ╔═══════════════════════════════════════════════════════════════════╗
-# ║ VARIABLE MANAGEMENT (BATCHED)                                      ║
-# ╚═══════════════════════════════════════════════════════════════════╝
-# Build --set args from APP_ENV_VARS + derived vars
-# =============================================================================
-# URL Configuration (Security Best Practice - Internal Networking):
-# =============================================================================
-# Backend Service (NO public domain required):
-#   - No REFLEX_API_URL needed (defaults to http://localhost:8000)
-#   - No REFLEX_DEPLOY_URL needed (defaults to http://localhost:8000)
-#   - CORS_ALLOWED_ORIGINS = frontend public URL
-#
-# Frontend Service:
-#   - REFLEX_API_URL = http://<backend>.railway.internal:8000 (internal URL)
-#   - REFLEX_DEPLOY_URL = https://<frontend>-<env>.up.railway.app (public URL)
-#
-# This setup keeps the backend unexposed to the public internet.
-# =============================================================================
-build_var_args() {
-    local service=$1
-    VAR_ARGS=()
-    
-    # Add app environment variables from APP_ENV_VARS (comma-separated key=value pairs)
-    if [ -n "$APP_ENV_VARS" ]; then
-        IFS=',' read -ra vars <<< "$APP_ENV_VARS"
-        for var in "${vars[@]}"; do
-            local key="${var%%=*}" val="${var#*=}"
-            [ -n "$key" ] && [ -n "$val" ] && VAR_ARGS+=("--set" "$key=$val")
-        done
-    fi
-    
-    # Core environment variables (both services need these)
-    [ -n "$APP_ENV" ] && VAR_ARGS+=("--set" "APP_ENV=$APP_ENV")
-    [ -n "$IS_DEMO" ] && VAR_ARGS+=("--set" "IS_DEMO=$IS_DEMO")
-    [ -n "$OPENAI_API_KEY" ] && VAR_ARGS+=("--set" "OPENAI_API_KEY=$OPENAI_API_KEY")
-    [ -n "$CALL_API_TOKEN" ] && VAR_ARGS+=("--set" "CALL_API_TOKEN=$CALL_API_TOKEN")
-    [ -n "$LOGLEVEL" ] && VAR_ARGS+=("--set" "LOGLEVEL=$LOGLEVEL")
-    
-    # Add derived Railway variables (skip DB if SKIP_DB is set)
-    [ -n "$REFLEX_DB_URL" ] && [ "$SKIP_DB" != true ] && VAR_ARGS+=("--set" "REFLEX_DB_URL=$REFLEX_DB_URL")
-    
-    # Service-specific URL configuration
-    if [ "$service" = "$FRONTEND_NAME" ]; then
-        # Frontend: REFLEX_API_URL = backend PUBLIC URL (required for client-side access)
-        [ -n "$BACKEND_PUBLIC_URL" ] && VAR_ARGS+=("--set" "REFLEX_API_URL=$BACKEND_PUBLIC_URL")
-        # Frontend: REFLEX_DEPLOY_URL = frontend's OWN public URL
-        [ -n "$FRONTEND_PUBLIC_URL" ] && VAR_ARGS+=("--set" "REFLEX_DEPLOY_URL=$FRONTEND_PUBLIC_URL")
-    fi
-    
-    if [ "$service" = "$BACKEND_NAME" ]; then
-        # Backend: No REFLEX_API_URL or REFLEX_DEPLOY_URL needed
-        # Defaults to http://localhost:8000 (see rxconfig.py)
-        # Backend: CORS_ALLOWED_ORIGINS = frontend public URL
-        [ -n "$FRONTEND_PUBLIC_URL" ] && VAR_ARGS+=("--set" "CORS_ALLOWED_ORIGINS=$FRONTEND_PUBLIC_URL")
-    fi
-}
-
-# Set vars and deploy using Dockerfile
-set_vars_and_deploy() {
-    local service=$1 type=$2
-    header "Deploying $service ($type)"
-    
-    # Copy the appropriate Dockerfile to root
-    if [ "$type" = "backend" ]; then
-        cp "$DEPLOY_DIR/Dockerfile.backend" Dockerfile 2>/dev/null || error "Dockerfile.backend not found"
-    else
-        cp "$DEPLOY_DIR/Dockerfile.frontend" Dockerfile 2>/dev/null || error "Dockerfile.frontend not found"
-    fi
-    
-    # Build variable args
-    build_var_args "$service"
-    
-    # Link to service
-    railway link -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" -s "$service" ${RAILWAY_TEAM:+-t "$RAILWAY_TEAM"} || error "Failed to link to $service"
-    
-    # Set variables first (railway variables --set)
-    if [ ${#VAR_ARGS[@]} -gt 0 ]; then
-        log "Setting ${#VAR_ARGS[@]} variables..."
-        railway variables "${VAR_ARGS[@]}" || warn "Some variables may not have been set"
-    fi
-    
-    # Then deploy
-    log "Deploying $service..."
-    railway up || error "Deploy failed for $service"
-    success "$service deployed"
-}
-
-# Update URL variables after deployment (fetch frontend domain from Railway)
-update_urls() {
-    local frontend_domain
-    local backend_domain
-    
-    frontend_domain=$(railway variables --service "$FRONTEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
-    backend_domain=$(railway variables --service "$BACKEND_NAME" --json 2>/dev/null | jq -r '.RAILWAY_PUBLIC_DOMAIN // empty' 2>/dev/null || echo "")
-    
-    # Update URLs if Railway provided different domains
-    [ -n "$frontend_domain" ] && FRONTEND_PUBLIC_URL="https://$frontend_domain"
-    [ -n "$backend_domain" ] && BACKEND_PUBLIC_URL="https://$backend_domain"
-    
-    log "Backend Public URL: $BACKEND_PUBLIC_URL"
-    log "Frontend Public URL: $FRONTEND_PUBLIC_URL"
-}
-
-# ╔═══════════════════════════════════════════════════════════════════╗
-# ║ SERVICE CREATION (FIRST-TIME ONLY)                                 ║
-# ╚═══════════════════════════════════════════════════════════════════╝
-create_postgres() {
-    # Skip if SKIP_DB is set
-    [ "$SKIP_DB" = true ] && { log "PostgreSQL skipped (SKIP_DB=true)"; return 0; }
-    [ "$POSTGRES_EXISTS" = true ] && { success "Postgres exists"; return 0; }
-    header "Creating PostgreSQL"
-    railway add -d postgres -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" ${RAILWAY_TEAM:+-t "$RAILWAY_TEAM"} || error "Failed to add PostgreSQL"
-    sleep 15
-    success "PostgreSQL created"
-}
-
-create_service() {
-    local service=$1
-    service_exists "$service" && { success "$service exists"; return 0; }
-    header "Creating $service"
-    railway add --service "$service" -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" ${RAILWAY_TEAM:+-t "$RAILWAY_TEAM"} || error "Failed to create $service"
-    
-    # Add public domain for both services
-    railway domain --service "$service" >/dev/null 2>&1 || true
-    log "Public domain added for $service"
-    
-    success "$service created"
-}
-
-# ╔═══════════════════════════════════════════════════════════════════╗
-# ║ MAIN DEPLOYMENT FLOW                                               ║
-# ╚═══════════════════════════════════════════════════════════════════╝
-deploy() {
-    # Validate
-    command -v railway &>/dev/null || error "Railway CLI not found"
-    railway whoami &>/dev/null || error "Not logged in. Run: railway login"
-    
-    # Check what exists
-    check_services
-    pause
-    
-    # Create services if needed (first-time setup)
-    local need_create=false
-    [ "$SKIP_DB" != true ] && [ "$POSTGRES_EXISTS" = false ] && need_create=true
-    [ "$BACKEND_EXISTS" = false ] && need_create=true  
-    [ "$FRONTEND_EXISTS" = false ] && need_create=true
-    
-    if [ "$need_create" = true ]; then
-        create_postgres
-        [ "$SKIP_DB" != true ] && get_db_url
-        create_service "$BACKEND_NAME"
-        create_service "$FRONTEND_NAME"
-        # Refresh service list
-        railway list --json > "$DEPLOY_DIR/railway_services.json" 2>/dev/null || true
-        pause
-    fi
-    
-    # Run migrations (skipped if SKIP_DB=true)
-    run_migrations
-    pause
-    
-    # Deploy backend first (frontend needs backend URL)
-    [ "$SKIP_DB" != true ] && get_db_url
-    set_vars_and_deploy "$BACKEND_NAME" "backend"
-    
-    # Get backend URL for frontend (if Railway provided different domain)
-    update_urls
-    pause
-    
-    # Deploy frontend with REFLEX_API_URL pointing to backend
-    set_vars_and_deploy "$FRONTEND_NAME" "frontend"
-    
-    # Final URL update
-    update_urls
-    
-    # Summary
-    header "Deployment Complete"
-    echo "✓ Backend:  $BACKEND_INTERNAL_URL (internal only - not publicly exposed)"
-    echo "✓ Frontend: $FRONTEND_PUBLIC_URL"
-    [ "$SKIP_DB" = true ] && echo "✓ Database: Skipped (demo mode)"
-}
+# Source modular functions
+source "$SCRIPT_DIR/functions/logging.sh"
+source "$SCRIPT_DIR/functions/env.sh"
+source "$SCRIPT_DIR/functions/railway.sh"
+source "$SCRIPT_DIR/functions/deploy.sh"
 
 # ╔═══════════════════════════════════════════════════════════════════╗
 # ║ ARGUMENT PARSING                                                   ║
 # ╚═══════════════════════════════════════════════════════════════════╝
+
 show_help() {
     cat << EOF
 Usage: $0 -p PROJECT [OPTIONS]
+
+Railway deployment for Reflex applications.
+Requires RAILWAY_TOKEN environment variable (or be logged in via 'railway login').
 
 Required:
   -p, --project PROJECT     Railway project ID/name
 
 Optional:
-  -t, --team TEAM          Railway team (default: personal)
-  -e, --environment ENV    Railway environment (default: production)
-  -d, --deploy-dir DIR     Deploy directory (default: reflex-railway-deploy)
-  -f, --file FILE          Environment file (default: .env)
-  -b, --backend NAME       Backend service name (default: backend)
-  -n, --frontend NAME      Frontend service name (default: frontend)
-  --skip-db                Skip PostgreSQL setup and migrations (for demo mode)
-  -y, --yes                Auto mode (skip pauses)
-  -h, --help               Show this help
+  -t, --team TEAM           Railway team (default: personal)
+  -e, --environment ENV     Railway environment (default: test)
+  -b, --backend NAME        Backend service name (default: backend)
+  -n, --frontend NAME       Frontend service name (default: frontend)
+  --skip-db                 Skip PostgreSQL setup and migrations
+  -h, --help                Show this help
+
+Environment:
+  APP_ENV                   Controls which .env.{APP_ENV} file is loaded (default: test)
+  RAILWAY_TOKEN             Railway API token (required for CI/CD)
+  APP_ENV_VARS              Comma-separated list of additional env vars to sync
 
 Examples:
-  $0 -p my-project
-  $0 -p my-project -b api -n web -y
-  $0 -p my-project --skip-db -y   # Deploy without database (demo mode)
+  # Local development (interactive login)
+  ./deploy_all.sh -p my-project
+
+  # CI/CD with token
+  RAILWAY_TOKEN=xxx ./deploy_all.sh -p my-project -e test
+
+  # Skip database (demo mode)
+  ./deploy_all.sh -p my-project --skip-db
 EOF
     exit 0
 }
 
-# Defaults
-DEPLOY_DIR="reflex-railway-deploy"
-ENV_FILE=".env"
+# Defaults - test environment by default for safety
 BACKEND_NAME="backend"
 FRONTEND_NAME="frontend"
-RAILWAY_ENVIRONMENT="production"
+RAILWAY_ENVIRONMENT="test"
 RAILWAY_TEAM=""
-AUTO_MODE=false
+RAILWAY_PROJECT=""
 SKIP_DB=false
 
-# Parse args
+# Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
         -h|--help) show_help ;;
         -p|--project) RAILWAY_PROJECT="$2"; shift 2 ;;
         -t|--team) RAILWAY_TEAM="$2"; shift 2 ;;
         -e|--environment) RAILWAY_ENVIRONMENT="$2"; shift 2 ;;
-        -d|--deploy-dir) DEPLOY_DIR="$2"; shift 2 ;;
-        -f|--file) ENV_FILE="$2"; shift 2 ;;
         -b|--backend) BACKEND_NAME="$2"; shift 2 ;;
         -n|--frontend) FRONTEND_NAME="$2"; shift 2 ;;
         --skip-db) SKIP_DB=true; shift ;;
-        -y|--yes) AUTO_MODE=true; shift ;;
-        *) error "Unknown option: $1" ;;
+        -y|--yes) shift ;;  # Accepted but ignored (always non-interactive)
+        *) error "Unknown option: $1. Use -h for help." ;;
     esac
 done
 
-# Validate
+# Validate required args
 [ -z "$RAILWAY_PROJECT" ] && error "Project required. Use: $0 -p PROJECT"
-[ -d "$DEPLOY_DIR" ] || error "Deploy dir not found: $DEPLOY_DIR"
+[ -d "$DEPLOY_DIR" ] || error "Deploy directory not found: $DEPLOY_DIR"
 
-# Load environment files using hierarchical envs/ structure
-# Order: .env.base -> .env.prod -> .env.secrets (later files override)
-ENVS_DIR="envs"
-if [ -d "$ENVS_DIR" ]; then
-    log "Loading environment from $ENVS_DIR/"
-    [ -f "$ENVS_DIR/.env.base" ] && { set -a; source "$ENVS_DIR/.env.base"; set +a; log "  ✓ Loaded .env.base"; }
-    [ -f "$ENVS_DIR/.env.prod" ] && { set -a; source "$ENVS_DIR/.env.prod"; set +a; log "  ✓ Loaded .env.prod"; }
-    [ -f "$ENVS_DIR/.env.secrets" ] && { set -a; source "$ENVS_DIR/.env.secrets"; set +a; log "  ✓ Loaded .env.secrets"; }
-elif [ -f "$ENV_FILE" ]; then
-    # Fallback to single .env file
-    set -a; source "$ENV_FILE"; set +a
-    log "Loaded $ENV_FILE"
-fi
+# ╔═══════════════════════════════════════════════════════════════════╗
+# ║ ENVIRONMENT SETUP                                                  ║
+# ╚═══════════════════════════════════════════════════════════════════╝
 
-# Auto-enable SKIP_DB if IS_DEMO is true (no database needed for demo mode)
+# Sync APP_ENV with RAILWAY_ENVIRONMENT if not explicitly set
+# This ensures .env.test is loaded for test environment, .env.prod for prod
+export APP_ENV="${APP_ENV:-$RAILWAY_ENVIRONMENT}"
+
+# Load environment files (base -> env-specific -> secrets)
+load_env_files "envs"
+
+# Auto-enable SKIP_DB if IS_DEMO is true
 [ "$IS_DEMO" = "true" ] && SKIP_DB=true
 
-# =============================================================================
-# Derive URLs from service names and environment
-# =============================================================================
-# Public URL for backend (required for client-side frontend to connect)
+# Derive public URLs from service names and environment
+# Railway generates: https://{service}-{environment}.up.railway.app
 BACKEND_PUBLIC_URL="https://${BACKEND_NAME}-${RAILWAY_ENVIRONMENT}.up.railway.app"
-# Public URL for frontend
 FRONTEND_PUBLIC_URL="https://${FRONTEND_NAME}-${RAILWAY_ENVIRONMENT}.up.railway.app"
 
-# Show config
+# Export variables needed by functions
+export DEPLOY_DIR RAILWAY_PROJECT RAILWAY_ENVIRONMENT RAILWAY_TEAM
+export BACKEND_NAME FRONTEND_NAME SKIP_DB
+export BACKEND_PUBLIC_URL FRONTEND_PUBLIC_URL
+export REFLEX_DB_URL APP_ENV IS_DEMO
+
+# ╔═══════════════════════════════════════════════════════════════════╗
+# ║ DEPLOYMENT                                                         ║
+# ╚═══════════════════════════════════════════════════════════════════╝
+
 header "Railway Deployment"
-echo "Project: $RAILWAY_PROJECT | Env: $RAILWAY_ENVIRONMENT"
+echo "Project: $RAILWAY_PROJECT | Environment: $RAILWAY_ENVIRONMENT"
 echo "Backend: $BACKEND_NAME | Frontend: $FRONTEND_NAME"
+echo "APP_ENV: $APP_ENV"
 [ -n "$RAILWAY_TEAM" ] && echo "Team: $RAILWAY_TEAM"
 [ "$SKIP_DB" = true ] && echo "Database: SKIPPED (demo mode)"
-echo "Backend Public URL: $BACKEND_PUBLIC_URL"
-echo "Frontend Public URL: $FRONTEND_PUBLIC_URL"
+echo ""
 
-# Run deployment
-deploy
+# Run the deployment
+run_deployment
