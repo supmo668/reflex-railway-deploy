@@ -62,17 +62,19 @@ run_migrations() {
     
     header "Database Migrations"
     
-    # Get public database URL for local migrations
-    local public_url
-    public_url=$(railway variables --service "Postgres" --json 2>/dev/null | jq -r '.DATABASE_PUBLIC_URL // empty' 2>/dev/null || echo "")
-    [ -z "$public_url" ] && public_url="$REFLEX_DB_URL"
+    # Use REFLEX_DB_URL from env if already set (e.g., from .env.test for Supabase)
+    # Otherwise try to get from Railway Postgres service
+    local db_url="$REFLEX_DB_URL"
+    if [ -z "$db_url" ]; then
+        db_url=$(railway variables --service "Postgres" --json 2>/dev/null | jq -r '.DATABASE_PUBLIC_URL // .DATABASE_URL // empty' 2>/dev/null || echo "")
+    fi
     
-    [ -z "$public_url" ] && { warn "No database URL, skipping migrations"; return 0; }
+    [ -z "$db_url" ] && { warn "No database URL, skipping migrations"; return 0; }
     
     log "Running migrations..."
-    REFLEX_DB_URL="$public_url" uv run reflex db init 2>/dev/null || true
-    REFLEX_DB_URL="$public_url" uv run reflex db makemigrations 2>/dev/null || true
-    REFLEX_DB_URL="$public_url" uv run reflex db migrate || error "Migrations failed"
+    REFLEX_DB_URL="$db_url" uv run reflex db init 2>/dev/null || true
+    REFLEX_DB_URL="$db_url" uv run reflex db makemigrations 2>/dev/null || true
+    REFLEX_DB_URL="$db_url" uv run reflex db migrate || error "Migrations failed"
     
     success "Migrations complete"
 }
@@ -97,17 +99,17 @@ run_deployment() {
     
     if [ "$need_create" = true ]; then
         create_postgres
-        [ "$SKIP_DB" != true ] && get_db_url
+        # Only fetch DB URL from Railway if not already set in env
+        [ "$SKIP_DB" != true ] && [ -z "$REFLEX_DB_URL" ] && get_db_url
         create_service "$BACKEND_NAME"
         create_service "$FRONTEND_NAME"
         refresh_services_cache
     fi
     
-    # Run migrations
+    # Run migrations (uses REFLEX_DB_URL from env or fetches from Railway)
     run_migrations
     
     # Deploy backend first (frontend needs backend URL)
-    [ "$SKIP_DB" != true ] && get_db_url
     deploy_service "$BACKEND_NAME" "backend"
     
     # Update URLs from Railway
