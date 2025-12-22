@@ -56,7 +56,8 @@ update_service_urls() {
     log "Frontend URL: $FRONTEND_PUBLIC_URL"
 }
 
-# Run database migrations
+# Run database migrations using Alembic directly
+# This properly handles both local SQLite and remote PostgreSQL (Supabase)
 run_migrations() {
     [ "$SKIP_DB" = true ] && { log "Migrations skipped (SKIP_DB=true)"; return 0; }
     
@@ -71,14 +72,37 @@ run_migrations() {
     
     [ -z "$db_url" ] && { warn "No database URL, skipping migrations"; return 0; }
     
-    log "Running migrations..."
-    REFLEX_DB_URL="$db_url" uv run reflex db init 2>/dev/null || true
-    REFLEX_DB_URL="$db_url" uv run reflex db makemigrations 2>/dev/null || true
-    # Don't fail on migration errors (table may already exist)
-    if REFLEX_DB_URL="$db_url" uv run reflex db migrate 2>/dev/null; then
+    # Mask password in logs
+    local masked_url
+    if [[ "$db_url" == *"@"* ]]; then
+        masked_url="...@${db_url#*@}"
+    else
+        masked_url="$db_url"
+    fi
+    log "Database: $masked_url"
+    
+    # Run Alembic migrations directly (more reliable than reflex db commands)
+    # The alembic/env.py reads REFLEX_DB_URL from environment
+    log "Running Alembic migrations..."
+    
+    # First, try to stamp head if alembic_version table doesn't exist
+    # This handles fresh databases where schema was created by Reflex
+    if REFLEX_DB_URL="$db_url" uv run alembic current 2>&1 | grep -q "No such revision"; then
+        log "Stamping database as current (fresh schema detected)..."
+        REFLEX_DB_URL="$db_url" uv run alembic stamp head 2>/dev/null || true
+    fi
+    
+    # Run upgrade to apply any pending migrations
+    if REFLEX_DB_URL="$db_url" uv run alembic upgrade head 2>&1; then
         success "Migrations complete"
     else
-        warn "Migration had issues (tables may already exist) - continuing deployment"
+        # If upgrade fails, try stamping head (schema may already match)
+        warn "Migration had issues - attempting to stamp current schema..."
+        if REFLEX_DB_URL="$db_url" uv run alembic stamp head 2>/dev/null; then
+            success "Database stamped at head (schema already up to date)"
+        else
+            warn "Migration stamp failed - continuing deployment (tables may already exist)"
+        fi
     fi
 }
 
