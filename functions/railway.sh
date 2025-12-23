@@ -11,15 +11,16 @@ validate_railway_cli() {
 
 # Link to Railway project and environment
 # Usage: railway_link "project" "environment" ["team"]
-# Note: Uses --yes to skip interactive prompts
+# Note: Links to project only, service linking happens in deploy_service
 railway_link() {
     local project=$1
     local environment=$2
     local team=${3:-}
     
     log "Linking to project: $project ($environment)"
-    # Skip service selection - we'll link to specific services during deploy
-    echo "" | railway link -p "$project" -e "$environment" ${team:+-t "$team"} 2>/dev/null || true
+    # Link without service - service is specified per-deploy
+    # Use /dev/null to make CLI non-interactive (auto-selects defaults)
+    railway link -p "$project" -e "$environment" ${team:+-t "$team"} < /dev/null 2>/dev/null || true
 }
 
 # Check if a service exists in the Railway project

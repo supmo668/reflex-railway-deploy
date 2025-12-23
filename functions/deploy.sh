@@ -21,8 +21,8 @@ deploy_service() {
     local var_args=()
     build_var_args "$service" var_args
     
-    # Link to service
-    railway link -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" -s "$service" ${RAILWAY_TEAM:+-t "$RAILWAY_TEAM"} || error "Failed to link to $service"
+    # Link to service (use /dev/null to make CLI non-interactive)
+    railway link -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" -s "$service" ${RAILWAY_TEAM:+-t "$RAILWAY_TEAM"} < /dev/null || error "Failed to link to $service"
     
     # Set variables
     if [ ${#var_args[@]} -gt 0 ]; then
@@ -30,9 +30,10 @@ deploy_service() {
         railway variables "${var_args[@]}" || warn "Some variables may not have been set"
     fi
     
-    # Deploy
+    # Deploy with detach (-d) to avoid waiting for logs
+    # This makes the script non-blocking and CI/CD friendly
     log "Deploying $service..."
-    railway up || error "Deploy failed for $service"
+    railway up -d || error "Deploy failed for $service"
     
     # Cleanup
     rm -f Dockerfile
@@ -112,8 +113,10 @@ run_deployment() {
     # Validate Railway CLI
     validate_railway_cli
     
-    # Link to project
-    railway_link "$RAILWAY_PROJECT" "$RAILWAY_ENVIRONMENT" "$RAILWAY_TEAM"
+    # NOTE: We skip the project-level railway_link here because:
+    # 1. It prompts for service selection (requires ESC to skip)
+    # 2. deploy_service() links to specific services with -s flag anyway
+    # The per-service link in deploy_service is sufficient for deployment
     
     # Check existing services
     check_services
