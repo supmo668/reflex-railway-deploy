@@ -21,18 +21,21 @@ deploy_service() {
     local var_args=()
     build_var_args "$service" var_args
     
-    # Link to service (use /dev/null to make CLI non-interactive)
-    railway link -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" -s "$service" ${RAILWAY_TEAM:+-t "$RAILWAY_TEAM"} < /dev/null || error "Failed to link to $service"
+    # Link to service
+    log "Linking to $service..."
+    if ! railway link -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" -s "$service" ${RAILWAY_TEAM:+-t "$RAILWAY_TEAM"} < /dev/null 2>&1; then
+        error "Failed to link to $service. Ensure the service exists in Railway project '$RAILWAY_PROJECT' environment '$RAILWAY_ENVIRONMENT'."
+    fi
     
     # Set variables
     if [ ${#var_args[@]} -gt 0 ]; then
         log "Setting ${#var_args[@]} variables..."
-        railway variables "${var_args[@]}" || warn "Some variables may not have been set"
+        railway variables "${var_args[@]}" 2>&1 || warn "Some variables may not have been set"
     fi
     
     # Deploy with detach (-d) to avoid waiting for logs
     # This makes the script non-blocking and CI/CD friendly
-    log "Deploying $service..."
+    log "Uploading and deploying $service..."
     railway up -d || error "Deploy failed for $service"
     
     # Cleanup

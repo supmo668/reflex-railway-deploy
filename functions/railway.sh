@@ -74,9 +74,17 @@ check_services() {
 }
 
 # Create PostgreSQL service (Railway managed)
+# NOTE: In CI/CD mode (RAILWAY_TOKEN set), this is skipped - services must be pre-created
 create_postgres() {
     [ "$SKIP_DB" = true ] && { log "PostgreSQL skipped (SKIP_DB=true)"; return 0; }
     [ "$POSTGRES_EXISTS" = true ] && { success "Postgres exists"; return 0; }
+    
+    # In CI/CD mode, can't create services interactively
+    if [ -n "$RAILWAY_TOKEN" ]; then
+        warn "PostgreSQL not found. In CI/CD mode, services must be pre-created in Railway dashboard."
+        warn "Skipping PostgreSQL creation - deployment may fail if DB is required."
+        return 0
+    fi
     
     header "Creating PostgreSQL"
     railway add -d postgres || error "Failed to add PostgreSQL"
@@ -86,28 +94,36 @@ create_postgres() {
 
 # Create an application service
 # Usage: create_service "service_name"
-# Note: Only creates if service doesn't exist. Uses railway link to verify existence.
+# NOTE: In CI/CD mode (RAILWAY_TOKEN set), services must be pre-created in Railway dashboard
 create_service() {
     local service=$1
     
-    # Try to link to the service first - if it works, service exists
-    if railway link -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" -s "$service" < /dev/null 2>/dev/null; then
+    # Try to link to the service - this validates it exists
+    log "Checking if $service exists..."
+    if railway link -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" -s "$service" < /dev/null 2>&1; then
         success "$service exists"
         return 0
     fi
     
     # Fallback to cache check
-    service_exists "$service" && { success "$service exists"; return 0; }
+    if service_exists "$service"; then
+        success "$service exists (from cache)"
+        return 0
+    fi
     
+    # In CI/CD mode, can't create services interactively
+    if [ -n "$RAILWAY_TOKEN" ]; then
+        warn "Service '$service' not found in project '$RAILWAY_PROJECT' environment '$RAILWAY_ENVIRONMENT'"
+        warn "In CI/CD mode, services must be pre-created in Railway dashboard."
+        warn "Create the service manually: railway add --service $service"
+        warn "Attempting deployment anyway (may fail)..."
+        return 0
+    fi
+    
+    # Interactive mode - try to create
     header "Creating $service"
-    # Use echo to provide empty input for interactive prompts
-    echo "" | railway add --service "$service" 2>/dev/null || {
-        # Service might already exist, try linking again
-        if railway link -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" -s "$service" < /dev/null 2>/dev/null; then
-            success "$service exists (created or already existed)"
-            return 0
-        fi
-        error "Failed to create $service"
+    railway add --service "$service" || {
+        warn "Failed to create $service - it may already exist"
     }
     
     # Add public domain
