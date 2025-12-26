@@ -86,12 +86,29 @@ create_postgres() {
 
 # Create an application service
 # Usage: create_service "service_name"
+# Note: Only creates if service doesn't exist. Uses railway link to verify existence.
 create_service() {
     local service=$1
+    
+    # Try to link to the service first - if it works, service exists
+    if railway link -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" -s "$service" < /dev/null 2>/dev/null; then
+        success "$service exists"
+        return 0
+    fi
+    
+    # Fallback to cache check
     service_exists "$service" && { success "$service exists"; return 0; }
     
     header "Creating $service"
-    railway add --service "$service" || error "Failed to create $service"
+    # Use echo to provide empty input for interactive prompts
+    echo "" | railway add --service "$service" 2>/dev/null || {
+        # Service might already exist, try linking again
+        if railway link -p "$RAILWAY_PROJECT" -e "$RAILWAY_ENVIRONMENT" -s "$service" < /dev/null 2>/dev/null; then
+            success "$service exists (created or already existed)"
+            return 0
+        fi
+        error "Failed to create $service"
+    }
     
     # Add public domain
     railway domain --service "$service" >/dev/null 2>&1 || true
