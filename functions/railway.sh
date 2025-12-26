@@ -2,10 +2,19 @@
 # functions/railway.sh - Railway CLI utilities
 # Usage: source functions/railway.sh
 
-# Validate Railway CLI is installed and logged in
+# Validate Railway CLI is installed and authenticated
+# Supports both interactive login and RAILWAY_TOKEN for CI/CD
 validate_railway_cli() {
     command -v railway &>/dev/null || error "Railway CLI not found. Install: npm install -g @railway/cli"
-    railway whoami &>/dev/null || error "Not logged in to Railway. Run: railway login"
+    
+    # Check if RAILWAY_TOKEN is set (CI/CD mode)
+    if [ -n "$RAILWAY_TOKEN" ]; then
+        success "Railway CLI ready (using RAILWAY_TOKEN)"
+        return 0
+    fi
+    
+    # Fall back to checking interactive login
+    railway whoami &>/dev/null || error "Not logged in to Railway. Run: railway login\nOr set RAILWAY_TOKEN for CI/CD"
     success "Railway CLI ready"
 }
 
