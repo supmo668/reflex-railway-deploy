@@ -18,7 +18,7 @@ This directory contains modular, reusable deployment scripts for deploying any R
 ```
 reflex-railway-deploy/
 ├── deploy_all.sh              # Main deployment orchestrator
-├── Dockerfile.backend         # Backend service Dockerfile  
+├── Dockerfile.backend         # Backend service Dockerfile
 ├── Dockerfile.frontend        # Frontend service Dockerfile
 └── functions/
     ├── logging.sh             # Color logging utilities
@@ -164,25 +164,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Railway CLI
         run: npm install -g @railway/cli
-      
+
       - uses: astral-sh/setup-uv@v4
-      
+
       - name: Install dependencies
         run: uv sync
-      
+
       - name: Make scripts executable
         run: chmod +x scripts/*.sh reflex-railway-deploy/**/*.sh
-      
+
       - name: Create secrets file
         run: |
           cat > envs/.env.secrets << EOF
           OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
           CALL_API_TOKEN=${{ secrets.CALL_API_TOKEN }}
           EOF
-      
+
       - name: Deploy
         run: ./scripts/deploy_myapp.sh ${{ inputs.environment }}
         env:

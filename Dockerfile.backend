@@ -34,8 +34,5 @@ ENV PORT=8000
 # Expose the port that Reflex backend runs on
 EXPOSE 8000
 
-# Create startup script that runs migrations then starts the app
-RUN echo '#!/bin/bash\nset -e\necho "Running database migrations..."\nuv run reflex db migrate || echo "Migration failed or already up to date"\necho "Starting Reflex backend..."\nexec uv run reflex run --env prod --backend-only' > /app/start.sh && chmod +x /app/start.sh
-
-# Command to run migrations then start the backend
-CMD ["/bin/bash", "/app/start.sh"]
+# Command to run the backend
+CMD ["uv", "run", "reflex", "run", "--env", "prod", "--backend-only"]
