@@ -60,7 +60,7 @@ build_var_args() {
     # Secrets (backend only - frontend doesn't need API keys)
     if [ "$service" = "$BACKEND_NAME" ]; then
         [ -n "$OPENAI_API_KEY" ] && _var_args+=("--set" "OPENAI_API_KEY=$OPENAI_API_KEY")
-        [ -n "$CALL_API_TOKEN" ] && _var_args+=("--set" "CALL_API_TOKEN=$CALL_API_TOKEN")
+        [ -n "$CALL_LOGS_API_KEY" ] && _var_args+=("--set" "CALL_LOGS_API_KEY=$CALL_LOGS_API_KEY")
     fi
     
     # App-specific variables from APP_ENV_VARS (comma-separated list of var names)

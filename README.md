@@ -81,7 +81,7 @@ envs/
 **Backend Service (receives secrets):**
 - `APP_ENV`, `IS_DEMO`, `LOGLEVEL`
 - `REFLEX_DB_URL` (if not skipped)
-- `OPENAI_API_KEY`, `CALL_API_TOKEN` (from .env.secrets)
+- `OPENAI_API_KEY`, `CALL_LOGS_API_KEY` (from .env.secrets)
 - `REFLEX_DEPLOY_URL`, `CORS_ALLOWED_ORIGINS`
 - Custom vars from `APP_ENV_VARS`
 
@@ -180,7 +180,7 @@ jobs:
         run: |
           cat > envs/.env.secrets << EOF
           OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-          CALL_API_TOKEN=${{ secrets.CALL_API_TOKEN }}
+          CALL_LOGS_API_KEY=${{ secrets.CALL_LOGS_API_KEY }}
           EOF
 
       - name: Deploy
