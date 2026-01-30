@@ -28,6 +28,11 @@ COPY pyproject.toml uv.lock* ./
 COPY reflex-audio-capture/ ./reflex-audio-capture/
 COPY reflex-clerk-api/ ./reflex-clerk-api/
 
+# Set pretend versions for setuptools_scm packages (no .git in Docker)
+# These packages use dynamic versioning that requires git metadata
+ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_REFLEX_AUDIO_CAPTURE=0.0.5
+ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_REFLEX_CLERK_API=0.0.1
+
 # Install Python dependencies using uv
 RUN uv sync --frozen
 
