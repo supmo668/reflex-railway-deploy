@@ -23,6 +23,11 @@ WORKDIR /app
 # Copy pyproject.toml and uv.lock for better caching
 COPY pyproject.toml uv.lock* ./
 
+# Copy local editable dependencies required by uv sync
+# These are referenced as editable packages in pyproject.toml/uv.lock
+COPY reflex-audio-capture/ ./reflex-audio-capture/
+COPY reflex-clerk-api/ ./reflex-clerk-api/
+
 # Install Python dependencies using uv
 RUN uv sync --frozen
 
